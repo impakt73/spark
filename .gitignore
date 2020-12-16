@@ -1,0 +1,6 @@
+# Rust stuff
+/target
+Cargo.lock
+
+# Imgui auto-generated files
+imgui.ini

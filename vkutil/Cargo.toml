@@ -1,0 +1,13 @@
+[package]
+name = "vkutil"
+version = "0.1.0"
+authors = ["Gregory Mitrano <gregory.mitrano@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ash                 = "0.31"
+ash-window          = "0.5"
+vk-mem              = "0.2"
+winit               = "0.22"
