@@ -1,5 +1,8 @@
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use std::time::Instant;
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 use winit::{
     event::{
         DeviceEvent, ElementState, Event, KeyboardInput, StartCause, VirtualKeyCode, WindowEvent,
@@ -10,12 +13,66 @@ use winit::{
 
 use crate::renderer::Renderer;
 
+/// Helper for measuring frame timer
+///
+/// Consumes frame time once per frame and manages the historical sample set over time
+/// Provides simple averaging functionality
+struct FrameTimer {
+    /// Set of all valid frame time samples
+    ///
+    /// The number of elements in this set is limited to max_samples
+    frame_times: VecDeque<Duration>,
+
+    /// The maximum number of frame time samples to store before dropping old data
+    max_samples: usize,
+}
+
+impl FrameTimer {
+    /// Creates a new frame timer object with the specified max number of samples
+    pub fn new(max_samples: usize) -> Self {
+        FrameTimer {
+            frame_times: Default::default(),
+            max_samples,
+        }
+    }
+
+    /// Inserts the provided frame time into the timer
+    ///
+    /// This will automatically bump out old values if necessary to stay under the max sample count
+    pub fn push_sample(&mut self, frame_time: Duration) {
+        self.frame_times.push_back(frame_time);
+
+        // Remove an old sample if necessary
+        if self.frame_times.len() > self.max_samples {
+            self.frame_times.pop_front();
+
+            // We should only ever be a single item over under normal operation
+            assert!(self.frame_times.len() == self.max_samples);
+        }
+    }
+
+    /// Calculates the current average frame time and returns it
+    pub fn calculate_average(&self) -> Duration {
+        let sum: Duration = self.frame_times.iter().sum();
+        let avg_us = (sum.as_micros() as f64 / self.frame_times.len() as f64) as u64;
+        Duration::from_micros(avg_us)
+    }
+
+    /// Returns a reference to the internal frame times queue
+    ///
+    /// This can be used by applications directly if they need more than averages
+    pub fn get_frame_times(&self) -> &VecDeque<Duration> {
+        &self.frame_times
+    }
+}
+
 pub struct Engine {
     imgui_context: Option<imgui::Context>,
     imgui_platform: Option<WinitPlatform>,
     renderer: Option<Renderer>,
     last_frame_time: Instant,
     exit_requested: bool,
+    timer: FrameTimer,
 }
 
 impl Engine {
@@ -26,6 +83,7 @@ impl Engine {
             renderer: None,
             last_frame_time: Instant::now(),
             exit_requested: false,
+            timer: FrameTimer::new(64),
         }
     }
 
@@ -126,12 +184,15 @@ impl Engine {
         self.renderer.as_mut().unwrap().begin_frame();
 
         let now = Instant::now();
+        let delta_time = now - self.last_frame_time;
         self.imgui_context
             .as_mut()
             .unwrap()
             .io_mut()
-            .update_delta_time(now - self.last_frame_time);
+            .update_delta_time(delta_time);
         self.last_frame_time = now;
+
+        self.timer.push_sample(delta_time);
 
         self.imgui_platform
             .as_mut()
@@ -143,6 +204,8 @@ impl Engine {
 
         self.renderer.as_mut().unwrap().begin_render();
 
+        let avg_frame_time_us = self.timer.calculate_average().as_micros() as f64;
+
         // Render UI
         if let Some(main_menu_bar) = ui.begin_main_menu_bar() {
             if let Some(file_menu) = ui.begin_menu(imgui::im_str!("File"), true) {
@@ -151,6 +214,21 @@ impl Engine {
                 }
 
                 file_menu.end(&ui);
+            }
+
+            ui.text(format!("CPU: {:.2}ms", avg_frame_time_us / 1000.0));
+            {
+                let frame_times_us = self
+                    .timer
+                    .get_frame_times()
+                    .iter()
+                    .map(|time| (time.as_micros() as f64 / 1000.0) as f32)
+                    .collect::<Vec<f32>>();
+                ui.plot_histogram(imgui::im_str!(""), &frame_times_us)
+                    .scale_min(0.0)
+                    .scale_max(16.7)
+                    .graph_size([64.0, 20.0])
+                    .build();
             }
             main_menu_bar.end(&ui);
         }
