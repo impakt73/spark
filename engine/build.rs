@@ -1,4 +1,4 @@
-use shaderc::{CompileOptions, Compiler, ResolvedInclude, ShaderKind};
+use shaderc::{CompileOptions, Compiler, EnvVersion, ResolvedInclude, ShaderKind, TargetEnv};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use walkdir::WalkDir;
@@ -22,6 +22,7 @@ fn compile_shaders(shaders_dir: &str, shaders: &[&str]) {
             ))
         }
     });
+    compile_options.set_target_env(TargetEnv::Vulkan, EnvVersion::Vulkan1_2 as u32);
 
     for shader in shaders {
         let path = Path::new(shaders_dir).join(shader);
@@ -50,5 +51,18 @@ fn main() {
         println!("cargo:rerun-if-changed={}", entry.path().to_string_lossy());
     }
 
-    compile_shaders("shaders", &["ImguiTriangle.vert", "ImguiTriangle.frag"]);
+    compile_shaders(
+        "shaders",
+        &[
+            // Core shaders
+            "ImguiTriangle.vert",
+            "ImguiTriangle.frag",
+            "FullscreenPass.vert",
+            "CopyTexture.frag",
+            // Test Shaders
+            "Red.comp",
+            "Green.comp",
+            "Yellow.comp",
+        ],
+    );
 }

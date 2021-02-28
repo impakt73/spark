@@ -4,61 +4,27 @@ use ash::{
 };
 use imgui::{DrawCmd, DrawCmdParams};
 
-use std::sync::{Arc, Weak};
+use std::{
+    fs::File,
+    io::Read,
+    sync::{Arc, Weak},
+};
 
 use imgui::internal::RawWrapper;
-use std::io;
-use std::io::Write;
 
 use std::slice;
 use vkutil::*;
 
+use crate::render_graph::{RenderGraph, RenderGraphResource};
+use crate::render_util::ConstantDataWriter;
+
+use std::default::Default;
+use std::io;
+use std::io::Write;
+
+use align_data::include_aligned;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-/// Utility structure that simplifies the process of writing data that's constant over a single frame into GPU memory
-struct ConstantDataWriter {
-    buffer: *mut u8,
-    buffer_size: usize,
-    bytes_written: usize,
-}
-
-impl ConstantDataWriter {
-    pub fn new(buffer: *mut u8, buffer_size: usize) -> Self {
-        ConstantDataWriter {
-            buffer,
-            buffer_size,
-            bytes_written: 0,
-        }
-    }
-
-    pub fn dword_offset(&self) -> u32 {
-        (self.bytes_written / 4) as u32
-    }
-}
-
-impl io::Write for ConstantDataWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let bytes_remaining = self.buffer_size - self.bytes_written;
-        let bytes_written = if buf.len() <= bytes_remaining {
-            buf.len()
-        } else {
-            bytes_remaining
-        };
-
-        let buffer = unsafe {
-            slice::from_raw_parts_mut(self.buffer.add(self.bytes_written), bytes_remaining)
-        };
-        buffer[..bytes_written].clone_from_slice(&buf[..bytes_written]);
-
-        self.bytes_written += bytes_written;
-
-        Ok(bytes_written as usize)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
 
 /// Selects a physical device from the provided list
 fn select_physical_device(physical_devices: &[vk::PhysicalDevice]) -> vk::PhysicalDevice {
@@ -74,7 +40,10 @@ const FRAME_MEMORY_SIZE: u64 = 8 * 1024 * 1024;
 const NUM_TEXTURE_SLOTS: u64 = 64;
 
 /// Texture slot index associated with the imgui font
-const IMGUI_FONT_TEXTURE_SLOT_INDEX: u64 = NUM_TEXTURE_SLOTS - 1;
+const IMGUI_FONT_TEXTURE_SLOT_INDEX: u64 = 0;
+
+/// Texture slot index associated with the render graph output
+const RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX: u64 = 1;
 
 struct FrameState {
     #[allow(dead_code)]
@@ -159,6 +128,7 @@ pub struct Renderer {
     #[allow(dead_code)]
     imgui_renderer: ImguiRenderer,
     frame_states: Vec<FrameState>,
+    constant_writer: ConstantDataWriter,
     frame_memory_buffer: VkBuffer,
     image_available_semaphores: Vec<VkSemaphore>,
     framebuffers: Vec<VkFramebuffer>,
@@ -170,9 +140,11 @@ pub struct Renderer {
     pipeline_layout: VkPipelineLayout,
     #[allow(dead_code)]
     descriptor_set_layout: VkDescriptorSetLayout,
+    graph_descriptor_set_layout: VkDescriptorSetLayout,
     #[allow(dead_code)]
     descriptor_pool: VkDescriptorPool,
     imgui_pipeline: VkPipeline,
+    graph_output_pipeline: VkPipeline,
     #[allow(dead_code)]
     pipeline_cache: VkPipelineCache,
     cur_frame_idx: usize,
@@ -352,10 +324,25 @@ impl Renderer {
             ]),
         )?;
 
+        let graph_descriptor_set_layout = VkDescriptorSetLayout::new(
+            device.raw(),
+            &vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(NUM_TEXTURE_SLOTS as u32)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+            ]),
+        )?;
+
         let pipeline_layout = VkPipelineLayout::new(
             device.raw(),
             &vk::PipelineLayoutCreateInfo::builder()
-                .set_layouts(&[descriptor_set_layout.raw()])
+                .set_layouts(&[
+                    descriptor_set_layout.raw(),
+                    graph_descriptor_set_layout.raw(),
+                ])
                 .push_constant_ranges(&[vk::PushConstantRange::builder()
                     .offset(0)
                     .size((4 * std::mem::size_of::<u32>()) as u32)
@@ -387,16 +374,20 @@ impl Renderer {
                 ]),
         )?;
 
-        let (_, imgui_vert_spv, _) = unsafe {
-            include_bytes!(concat!(env!("OUT_DIR"), "/ImguiTriangle.vert.spv")).align_to::<u32>()
+        let imgui_vert_spv = unsafe {
+            include_aligned!(u32, concat!(env!("OUT_DIR"), "/ImguiTriangle.vert.spv"))
+                .align_to::<u32>()
+                .1
         };
         let imgui_vert_module = VkShaderModule::new(
             device.raw(),
             &vk::ShaderModuleCreateInfo::builder().code(imgui_vert_spv),
         )?;
 
-        let (_, imgui_frag_spv, _) = unsafe {
-            include_bytes!(concat!(env!("OUT_DIR"), "/ImguiTriangle.frag.spv")).align_to::<u32>()
+        let imgui_frag_spv = unsafe {
+            include_aligned!(u32, concat!(env!("OUT_DIR"), "/ImguiTriangle.frag.spv"))
+                .align_to::<u32>()
+                .1
         };
         let imgui_frag_module = VkShaderModule::new(
             device.raw(),
@@ -495,6 +486,95 @@ impl Renderer {
                 .subpass(0),
         )?;
 
+        let graph_output_vert_spv = unsafe {
+            include_aligned!(u32, concat!(env!("OUT_DIR"), "/FullscreenPass.vert.spv"))
+                .align_to::<u32>()
+                .1
+        };
+        let graph_output_vert_module = VkShaderModule::new(
+            device.raw(),
+            &vk::ShaderModuleCreateInfo::builder().code(graph_output_vert_spv),
+        )?;
+
+        let graph_output_frag_spv = unsafe {
+            include_aligned!(u32, concat!(env!("OUT_DIR"), "/CopyTexture.frag.spv"))
+                .align_to::<u32>()
+                .1
+        };
+        let graph_output_frag_module = VkShaderModule::new(
+            device.raw(),
+            &vk::ShaderModuleCreateInfo::builder().code(graph_output_frag_spv),
+        )?;
+
+        let graph_output_entry_point_c_string = std::ffi::CString::new("main").unwrap();
+        let graph_output_pipeline = pipeline_cache.create_graphics_pipeline(
+            &vk::GraphicsPipelineCreateInfo::builder()
+                .stages(&[
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::VERTEX)
+                        .module(graph_output_vert_module.raw())
+                        .name(graph_output_entry_point_c_string.as_c_str())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::FRAGMENT)
+                        .module(graph_output_frag_module.raw())
+                        .name(graph_output_entry_point_c_string.as_c_str())
+                        .build(),
+                ])
+                .input_assembly_state(
+                    &vk::PipelineInputAssemblyStateCreateInfo::builder()
+                        .topology(vk::PrimitiveTopology::TRIANGLE_LIST),
+                )
+                .vertex_input_state(
+                    &vk::PipelineVertexInputStateCreateInfo::builder()
+                        .vertex_binding_descriptions(&[])
+                        .vertex_attribute_descriptions(&[]),
+                )
+                .viewport_state(
+                    &vk::PipelineViewportStateCreateInfo::builder()
+                        .viewports(&[vk::Viewport::builder()
+                            .x(0.0)
+                            .y(0.0)
+                            .width(surface_resolution.width as f32)
+                            .height(surface_resolution.height as f32)
+                            .build()])
+                        .scissors(&[vk::Rect2D::builder()
+                            .offset(vk::Offset2D { x: 0, y: 0 })
+                            .extent(vk::Extent2D {
+                                width: surface_resolution.width,
+                                height: surface_resolution.height,
+                            })
+                            .build()]),
+                )
+                .rasterization_state(
+                    &vk::PipelineRasterizationStateCreateInfo::builder()
+                        .polygon_mode(vk::PolygonMode::FILL)
+                        .cull_mode(vk::CullModeFlags::NONE)
+                        .line_width(1.0),
+                )
+                .multisample_state(
+                    &vk::PipelineMultisampleStateCreateInfo::builder()
+                        .rasterization_samples(vk::SampleCountFlags::TYPE_1),
+                )
+                // Don't need depth state
+                .color_blend_state(
+                    &vk::PipelineColorBlendStateCreateInfo::builder().attachments(&[
+                        vk::PipelineColorBlendAttachmentState::builder()
+                            .color_write_mask(
+                                vk::ColorComponentFlags::R
+                                    | vk::ColorComponentFlags::G
+                                    | vk::ColorComponentFlags::B
+                                    | vk::ColorComponentFlags::A,
+                            )
+                            .blend_enable(false)
+                            .build(),
+                    ]),
+                )
+                .layout(pipeline_layout.raw())
+                .render_pass(renderpass.raw())
+                .subpass(0),
+        )?;
+
         let image_available_semaphores = swapchain
             .images
             .iter()
@@ -533,6 +613,7 @@ impl Renderer {
         Ok(Renderer {
             imgui_renderer,
             frame_states,
+            constant_writer: ConstantDataWriter::default(),
             frame_memory_buffer,
             framebuffers,
             image_available_semaphores,
@@ -541,8 +622,10 @@ impl Renderer {
             sampler,
             pipeline_layout,
             descriptor_set_layout,
+            graph_descriptor_set_layout,
             descriptor_pool,
             imgui_pipeline,
+            graph_output_pipeline,
             pipeline_cache,
             cur_frame_idx: 0,
             cur_swapchain_idx: 0,
@@ -558,6 +641,21 @@ impl Renderer {
 
     fn get_cur_frame_state(&self) -> &FrameState {
         &self.frame_states[self.cur_swapchain_idx]
+    }
+
+    pub fn get_cur_swapchain_idx(&self) -> usize {
+        self.cur_swapchain_idx
+    }
+
+    pub fn get_num_frame_states(&self) -> usize {
+        self.frame_states.len()
+    }
+
+    pub fn get_swapchain_resolution(&self) -> (u32, u32) {
+        (
+            self.swapchain.surface_resolution.width,
+            self.swapchain.surface_resolution.height,
+        )
     }
 
     pub fn recreate_swapchain(&mut self, window: &winit::window::Window) -> Result<()> {
@@ -652,24 +750,50 @@ impl Renderer {
             assert!(!_is_suboptimal);
             self.cur_swapchain_idx = image_index as usize;
 
+            let constant_data_offset = self.cur_swapchain_idx * (FRAME_MEMORY_SIZE as usize);
+
+            self.constant_writer.begin_frame(
+                self.frame_memory_buffer
+                    .info()
+                    .get_mapped_data()
+                    .add(constant_data_offset),
+                FRAME_MEMORY_SIZE as usize,
+            );
+
             let frame_state = self.get_cur_frame_state();
 
+            let device = self.device.raw().upgrade().unwrap();
+
+            let descriptor_set = frame_state.descriptor_set;
+
             // Wait for the resources for this frame to become available
-            self.device
-                .raw()
-                .upgrade()
-                .unwrap()
+            device
                 .wait_for_fences(&[frame_state.fence.raw()], true, u64::MAX)
                 .unwrap();
 
             let cmd_buffer = frame_state.cmd_buffer;
 
-            self.device
-                .raw()
-                .upgrade()
-                .unwrap()
+            device
                 .begin_command_buffer(cmd_buffer, &vk::CommandBufferBeginInfo::default())
                 .unwrap();
+
+            device.cmd_bind_descriptor_sets(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout.raw(),
+                0,
+                &[descriptor_set],
+                &[constant_data_offset as u32],
+            );
+
+            device.cmd_bind_descriptor_sets(
+                cmd_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                self.pipeline_layout.raw(),
+                0,
+                &[descriptor_set],
+                &[constant_data_offset as u32],
+            );
         }
     }
 
@@ -709,6 +833,8 @@ impl Renderer {
     }
 
     pub fn end_frame(&mut self) {
+        self.constant_writer.end_frame();
+
         let frame_state = self.get_cur_frame_state();
         unsafe {
             self.device
@@ -762,37 +888,67 @@ impl Renderer {
         unsafe { self.get_device().device_wait_idle().unwrap() };
     }
 
-    fn get_device(&self) -> Arc<ash::Device> {
+    pub fn get_device(&self) -> Arc<ash::Device> {
         self.device.raw().upgrade().unwrap()
     }
 
-    pub fn render_ui(&mut self, draw_data: &imgui::DrawData) {
-        let frame_state = &mut self.frame_states[self.cur_swapchain_idx];
-        let descriptor_set = frame_state.descriptor_set;
+    pub fn get_allocator(&self) -> Weak<vk_mem::Allocator> {
+        Arc::downgrade(&self.allocator)
+    }
 
-        let constant_data_offset = self.cur_swapchain_idx * (FRAME_MEMORY_SIZE as usize);
+    pub fn get_graph_descriptor_set_layout(&self) -> &VkDescriptorSetLayout {
+        &self.graph_descriptor_set_layout
+    }
+
+    pub fn render_graph_image(&mut self, image_view: &VkImageView) {
+        let frame_state = &mut self.frame_states[self.cur_swapchain_idx];
 
         let device = self.device.raw().upgrade().unwrap();
         let cmd_buffer = frame_state.cmd_buffer;
 
         unsafe {
-            device.cmd_bind_descriptor_sets(
+            device.cmd_bind_pipeline(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
+                self.graph_output_pipeline.raw(),
+            );
+
+            device.update_descriptor_sets(
+                &[vk::WriteDescriptorSet::builder()
+                    .dst_set(frame_state.descriptor_set)
+                    .dst_binding(2)
+                    .dst_array_element(RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX as u32)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&[vk::DescriptorImageInfo::builder()
+                        .image_view(image_view.raw())
+                        .image_layout(vk::ImageLayout::GENERAL)
+                        .build()])
+                    .build()],
+                &[],
+            );
+
+            let push_constant_0 = (RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX & 0xff) << 24;
+            device.cmd_push_constants(
+                cmd_buffer,
                 self.pipeline_layout.raw(),
+                vk::ShaderStageFlags::VERTEX
+                    | vk::ShaderStageFlags::FRAGMENT
+                    | vk::ShaderStageFlags::COMPUTE,
                 0,
-                &[descriptor_set],
-                &[constant_data_offset as u32],
+                &push_constant_0.to_le_bytes(),
             );
 
-            let mut constant_writer = ConstantDataWriter::new(
-                self.frame_memory_buffer
-                    .info()
-                    .get_mapped_data()
-                    .add(constant_data_offset),
-                FRAME_MEMORY_SIZE as usize,
-            );
+            device.cmd_draw(cmd_buffer, 6, 1, 0, 0);
+        }
+    }
 
+    pub fn render_ui(&mut self, draw_data: &imgui::DrawData) {
+        let frame_state = &mut self.frame_states[self.cur_swapchain_idx];
+
+        let device = self.device.raw().upgrade().unwrap();
+        let cmd_buffer = frame_state.cmd_buffer;
+
+        unsafe {
             let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
             let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
             if (fb_width > 0.0) && (fb_height > 0.0) && draw_data.total_idx_count > 0 {
@@ -899,12 +1055,12 @@ impl Renderer {
                 ];
 
                 // Identify the current constant buffer offset before we write any new data into it
-                let dword_offset = constant_writer.dword_offset();
+                let dword_offset = self.constant_writer.dword_offset();
 
                 // Write the imgui matrix into the buffer
                 for row in &matrix {
                     for val in row {
-                        constant_writer.write_all(&val.to_le_bytes()).unwrap();
+                        self.constant_writer.write_all(&val.to_le_bytes()).unwrap();
                     }
                 }
 
@@ -1006,6 +1162,174 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    pub fn create_compute_pipeline_from_buffer(
+        &mut self,
+        spv: &[u32],
+    ) -> Result<VkPipeline> {
+        let module = VkShaderModule::new(
+            self.device.raw(),
+            &vk::ShaderModuleCreateInfo::builder().code(spv),
+        )?;
+
+        let entry_point_c_string = std::ffi::CString::new("main").unwrap();
+        let pipeline = self.pipeline_cache.create_compute_pipeline(
+            &vk::ComputePipelineCreateInfo::builder()
+                .stage(
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::COMPUTE)
+                        .module(module.raw())
+                        .name(entry_point_c_string.as_c_str())
+                        .build(),
+                )
+                .layout(self.pipeline_layout.raw()),
+        )?;
+
+        Ok(pipeline)
+    }
+
+    pub fn create_compute_pipeline_from_file(&mut self, spv_path: &str) -> Result<VkPipeline> {
+        let mut spv = Vec::new();
+
+        let mut file = File::open(spv_path)?;
+        loop {
+            let mut dword: [u8; 4] = [0; 4];
+
+            match file.read(&mut dword)? {
+                4 => {
+                    spv.push(u32::from_le_bytes(dword));
+                }
+                0 => {
+                    break;
+                }
+                _ => {
+                    return Err(Box::new(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "Not enough bytes for SPIR-V data",
+                    )));
+                }
+            }
+        }
+
+        self.create_compute_pipeline_from_buffer(&spv)
+    }
+
+    pub fn execute_graph(&mut self, graph: &RenderGraph) -> Result<()> {
+        let renderer_frame_state = &mut self.frame_states[self.cur_swapchain_idx];
+
+        let graph_frame_state = &graph.frame_states[self.cur_swapchain_idx];
+
+        let device = self.device.raw().upgrade().unwrap();
+        let cmd_buffer = renderer_frame_state.cmd_buffer;
+
+        unsafe {
+            // Initialize all resources for the current frame state
+            let mut image_barriers = Vec::new();
+
+            for resource in &graph_frame_state.resources {
+                match resource {
+                    RenderGraphResource::Buffer(_) => {
+                        // Do nothing
+                    }
+                    RenderGraphResource::Image(render_graph_image) => {
+                        let image_barrier = vk::ImageMemoryBarrier::builder()
+                            .src_access_mask(vk::AccessFlags::empty())
+                            .dst_access_mask(
+                                vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                            )
+                            .old_layout(vk::ImageLayout::UNDEFINED)
+                            .new_layout(vk::ImageLayout::GENERAL)
+                            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                            .image(render_graph_image.image.raw())
+                            .subresource_range(
+                                vk::ImageSubresourceRange::builder()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .base_mip_level(0)
+                                    .level_count(1)
+                                    .base_array_layer(0)
+                                    .layer_count(1)
+                                    .build(),
+                            )
+                            .build();
+                        image_barriers.push(image_barrier);
+                    }
+                }
+            }
+
+            if !image_barriers.is_empty() {
+                device.cmd_pipeline_barrier(
+                    cmd_buffer,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &image_barriers,
+                );
+            }
+
+            device.cmd_bind_descriptor_sets(
+                cmd_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                self.pipeline_layout.raw(),
+                1,
+                &[graph_frame_state.descriptor_set],
+                &[],
+            );
+
+            for node in &graph.nodes {
+                device.cmd_bind_pipeline(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    node.pipeline.raw(),
+                );
+
+                // The texture slot index is stored inside the ImGui texture id
+                let push_constant_1 = node.get_ref(0).index();
+                let push_constant_2 = node.get_ref(1).index();
+                let push_constant_3 = node.get_ref(2).index();
+                let push_constants: [u32; 4] =
+                    [0, push_constant_1, push_constant_2, push_constant_3];
+                device.cmd_push_constants(
+                    cmd_buffer,
+                    self.pipeline_layout.raw(),
+                    vk::ShaderStageFlags::VERTEX
+                        | vk::ShaderStageFlags::FRAGMENT
+                        | vk::ShaderStageFlags::COMPUTE,
+                    0,
+                    &push_constants.align_to::<u8>().1,
+                );
+
+                device.cmd_dispatch(
+                    cmd_buffer,
+                    node.dims.num_groups_x,
+                    node.dims.num_groups_y,
+                    node.dims.num_groups_z,
+                );
+
+                // TODO: Allow appropriate nodes to overlap execution once dependencies are implemented.
+                device.cmd_pipeline_barrier(
+                    cmd_buffer,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[vk::MemoryBarrier::builder()
+                        .src_access_mask(
+                            vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                        )
+                        .dst_access_mask(
+                            vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                        )
+                        .build()],
+                    &[],
+                    &[],
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 

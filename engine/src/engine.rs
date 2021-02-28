@@ -1,3 +1,4 @@
+use ash::vk;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::{
     collections::VecDeque,
@@ -11,7 +12,14 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use crate::render_graph::{
+    RenderGraph, RenderGraphDesc, RenderGraphDispatchDimensions, RenderGraphImageParams,
+    RenderGraphNodeDesc, RenderGraphPipelineSource, RenderGraphResourceDesc,
+    RenderGraphResourceParams,
+};
 use crate::renderer::Renderer;
+
+use align_data::include_aligned;
 
 /// Helper for measuring frame timer
 ///
@@ -69,6 +77,7 @@ impl FrameTimer {
 pub struct Engine {
     imgui_context: Option<imgui::Context>,
     imgui_platform: Option<WinitPlatform>,
+    graph: Option<RenderGraph>,
     renderer: Option<Renderer>,
     last_frame_time: Instant,
     exit_requested: bool,
@@ -80,6 +89,7 @@ impl Engine {
         Engine {
             imgui_context: None,
             imgui_platform: None,
+            graph: None,
             renderer: None,
             last_frame_time: Instant::now(),
             exit_requested: false,
@@ -98,12 +108,100 @@ impl Engine {
         let mut platform = WinitPlatform::init(&mut context);
         platform.attach_window(context.io_mut(), &window, HiDpiMode::Default);
 
-        let renderer =
-            Renderer::new(&window, true, &mut context).expect("Failed to create renderer");
+        let enable_validation = cfg!(debug_asserts);
+        let renderer = Renderer::new(&window, enable_validation, &mut context)
+            .expect("Failed to create renderer");
 
         self.imgui_context = Some(context);
         self.imgui_platform = Some(platform);
         self.renderer = Some(renderer);
+
+        // Test graph
+        let (swapchain_width, swapchain_height) =
+            self.renderer.as_ref().unwrap().get_swapchain_resolution();
+
+        let dispatch_dims = RenderGraphDispatchDimensions {
+            num_groups_x: ((swapchain_width + 7) & !7) / 8,
+            num_groups_y: ((swapchain_height + 3) & !3) / 4,
+            num_groups_z: 1,
+        };
+
+        let mut nodes = Vec::new();
+
+        nodes.push(RenderGraphNodeDesc {
+            pipeline: RenderGraphPipelineSource::Buffer(unsafe {
+                include_aligned!(u32, concat!(env!("OUT_DIR"), "/Red.comp.spv"))
+                    .align_to::<u32>()
+                    .1
+            }),
+            refs: vec![String::from("RedImage")],
+            dims: dispatch_dims,
+        });
+
+        nodes.push(RenderGraphNodeDesc {
+            pipeline: RenderGraphPipelineSource::Buffer(unsafe {
+                include_aligned!(u32, concat!(env!("OUT_DIR"), "/Green.comp.spv"))
+                    .align_to::<u32>()
+                    .1
+            }),
+            refs: vec![String::from("GreenImage")],
+            dims: dispatch_dims,
+        });
+
+        nodes.push(RenderGraphNodeDesc {
+            pipeline: RenderGraphPipelineSource::Buffer(unsafe {
+                include_aligned!(u32, concat!(env!("OUT_DIR"), "/Yellow.comp.spv"))
+                    .align_to::<u32>()
+                    .1
+            }),
+            refs: vec![
+                String::from("RedImage"),
+                String::from("GreenImage"),
+                String::from("YellowImage"),
+            ],
+            dims: dispatch_dims,
+        });
+
+        let mut resources = Vec::new();
+
+        resources.push(RenderGraphResourceDesc {
+            name: String::from("RedImage"),
+            params: RenderGraphResourceParams::Image(RenderGraphImageParams {
+                width: swapchain_width,
+                height: swapchain_height,
+                format: vk::Format::R8G8B8A8_UNORM,
+            }),
+        });
+
+        resources.push(RenderGraphResourceDesc {
+            name: String::from("GreenImage"),
+            params: RenderGraphResourceParams::Image(RenderGraphImageParams {
+                width: swapchain_width,
+                height: swapchain_height,
+                format: vk::Format::R8G8B8A8_UNORM,
+            }),
+        });
+
+        resources.push(RenderGraphResourceDesc {
+            name: String::from("YellowImage"),
+            params: RenderGraphResourceParams::Image(RenderGraphImageParams {
+                width: swapchain_width,
+                height: swapchain_height,
+                format: vk::Format::R8G8B8A8_UNORM,
+            }),
+        });
+
+        let output_image_name = Some(String::from("YellowImage"));
+
+        let render_graph_desc = RenderGraphDesc {
+            resources,
+            nodes,
+            output_image_name,
+        };
+        self.graph = Some(
+            RenderGraph::new(&render_graph_desc, self.renderer.as_mut().unwrap())
+                .expect("Failed to create render graph"),
+        );
     }
 
     fn destroy(&mut self) {
@@ -202,8 +300,6 @@ impl Engine {
 
         let ui = self.imgui_context.as_mut().unwrap().frame();
 
-        self.renderer.as_mut().unwrap().begin_render();
-
         let avg_frame_time_us = self.timer.calculate_average().as_micros() as f64;
 
         // Render UI
@@ -239,6 +335,27 @@ impl Engine {
             .prepare_render(&ui, &window);
         let draw_data = ui.render();
 
+        self.renderer
+            .as_mut()
+            .unwrap()
+            .execute_graph(self.graph.as_ref().unwrap())
+            .expect("Failed to execute render graph");
+
+        self.renderer.as_mut().unwrap().begin_render();
+
+        let cur_swapchain_idx = self.renderer.as_ref().unwrap().get_cur_swapchain_idx();
+        if let Some(output_image_view) = self
+            .graph
+            .as_ref()
+            .unwrap()
+            .get_output_image(cur_swapchain_idx)
+        {
+            self.renderer
+                .as_mut()
+                .unwrap()
+                .render_graph_image(output_image_view);
+        }
+
         self.renderer.as_mut().unwrap().render_ui(draw_data);
 
         self.renderer.as_mut().unwrap().end_render();
@@ -260,5 +377,11 @@ impl Engine {
         event_loop.run(move |event, _, control_flow| {
             self.handle_event(&mut window, &event, control_flow);
         });
+    }
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
     }
 }

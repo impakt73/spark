@@ -13,7 +13,8 @@ imgui               = "0.5"
 imgui-winit-support = "0.5"
 vk-mem              = "0.2"
 winit               = "0.22"
-vkutil = { path = "../vkutil" }
+vkutil              = { path = "../vkutil" }
+align-data          = "0.1"
 
 [build-dependencies]
 walkdir = "2"

@@ -1,0 +1,23 @@
+#version 450
+
+#pragma shader_stage(compute)
+
+layout (local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
+
+#include "Common.glsl"
+
+void main()
+{
+    const uint redImgIdx = ShaderIoSlot0();
+    const uint greenImgIdx = ShaderIoSlot1();
+    const uint outputImgIdx = ShaderIoSlot2();
+
+    const ivec2 centerTexCoord = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 texDimensions = imageSize(uImages[outputImgIdx]);
+    if ((centerTexCoord.x < texDimensions.x) && (centerTexCoord.y < texDimensions.y))
+    {
+        const vec3 red = imageLoad(uImages[redImgIdx], centerTexCoord).rgb;
+        const vec3 green = imageLoad(uImages[greenImgIdx], centerTexCoord).rgb;
+        imageStore(uImages[outputImgIdx], centerTexCoord, vec4(red + green, 1.0));
+    }
+}

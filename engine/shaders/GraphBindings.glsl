@@ -1,0 +1,1 @@
+layout(set = 1, binding = 0, rgba8) uniform image2D uImages[64];

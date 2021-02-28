@@ -1,0 +1,19 @@
+#version 450
+
+#pragma shader_stage(compute)
+
+layout (local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
+
+#include "Common.glsl"
+
+void main()
+{
+    const uint outputImgIdx = ShaderIoSlot0();
+
+    const ivec2 centerTexCoord = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 texDimensions = imageSize(uImages[outputImgIdx]);
+    if ((centerTexCoord.x < texDimensions.x) && (centerTexCoord.y < texDimensions.y))
+    {
+        imageStore(uImages[outputImgIdx], centerTexCoord, vec4(0.0, 1.0, 0.0, 1.0));
+    }
+}
