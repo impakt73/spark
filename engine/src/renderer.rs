@@ -532,19 +532,8 @@ impl Renderer {
                 )
                 .viewport_state(
                     &vk::PipelineViewportStateCreateInfo::builder()
-                        .viewports(&[vk::Viewport::builder()
-                            .x(0.0)
-                            .y(0.0)
-                            .width(surface_resolution.width as f32)
-                            .height(surface_resolution.height as f32)
-                            .build()])
-                        .scissors(&[vk::Rect2D::builder()
-                            .offset(vk::Offset2D { x: 0, y: 0 })
-                            .extent(vk::Extent2D {
-                                width: surface_resolution.width,
-                                height: surface_resolution.height,
-                            })
-                            .build()]),
+                        .viewports(&[vk::Viewport::default()])
+                        .scissors(&[vk::Rect2D::default()]),
                 )
                 .rasterization_state(
                     &vk::PipelineRasterizationStateCreateInfo::builder()
@@ -569,6 +558,10 @@ impl Renderer {
                             .blend_enable(false)
                             .build(),
                     ]),
+                )
+                .dynamic_state(
+                    &vk::PipelineDynamicStateCreateInfo::builder()
+                        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]),
                 )
                 .layout(pipeline_layout.raw())
                 .render_pass(renderpass.raw())
@@ -906,11 +899,38 @@ impl Renderer {
         let device = self.device.raw().upgrade().unwrap();
         let cmd_buffer = frame_state.cmd_buffer;
 
+        let swapchain_resolution = self.swapchain.surface_resolution;
+
         unsafe {
             device.cmd_bind_pipeline(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graph_output_pipeline.raw(),
+            );
+
+            device.cmd_set_viewport(
+                cmd_buffer,
+                0,
+                &[vk::Viewport::builder()
+                    .x(0.0)
+                    .y(0.0)
+                    .width(swapchain_resolution.width as f32)
+                    .height(swapchain_resolution.height as f32)
+                    .build()],
+            );
+
+            device.cmd_set_scissor(
+                cmd_buffer,
+                0,
+                &[vk::Rect2D::builder()
+                    .offset(vk::Offset2D::builder().x(0).y(0).build())
+                    .extent(
+                        vk::Extent2D::builder()
+                            .width(swapchain_resolution.width)
+                            .height(swapchain_resolution.height)
+                            .build(),
+                    )
+                    .build()],
             );
 
             device.update_descriptor_sets(
@@ -1164,10 +1184,7 @@ impl Renderer {
         }
     }
 
-    pub fn create_compute_pipeline_from_buffer(
-        &mut self,
-        spv: &[u32],
-    ) -> Result<VkPipeline> {
+    pub fn create_compute_pipeline_from_buffer(&mut self, spv: &[u32]) -> Result<VkPipeline> {
         let module = VkShaderModule::new(
             self.device.raw(),
             &vk::ShaderModuleCreateInfo::builder().code(spv),
@@ -1269,6 +1286,17 @@ impl Renderer {
                     &image_barriers,
                 );
             }
+
+            // We don't actually use this set on GFX, but it is available in the fragment shaders.
+            // This causes warnings if we don't update the set here for GFX too.
+            device.cmd_bind_descriptor_sets(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout.raw(),
+                1,
+                &[graph_frame_state.descriptor_set],
+                &[],
+            );
 
             device.cmd_bind_descriptor_sets(
                 cmd_buffer,

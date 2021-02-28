@@ -116,6 +116,10 @@ impl Engine {
         self.imgui_platform = Some(platform);
         self.renderer = Some(renderer);
 
+        self.init_render_graph();
+    }
+
+    fn init_render_graph(&mut self) {
         // Test graph
         let (swapchain_width, swapchain_height) =
             self.renderer.as_ref().unwrap().get_swapchain_resolution();
@@ -218,6 +222,8 @@ impl Engine {
             .unwrap()
             .recreate_swapchain(&window)
             .unwrap();
+
+        self.init_render_graph();
     }
 
     fn handle_event(
