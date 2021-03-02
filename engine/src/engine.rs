@@ -134,7 +134,7 @@ impl Engine {
 
         nodes.push(RenderGraphNodeDesc {
             pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                include_aligned!(u32, concat!(env!("OUT_DIR"), "/Red.comp.spv"))
+                include_aligned!(u32, "../spv/Red.comp.spv")
                     .align_to::<u32>()
                     .1
             }),
@@ -144,7 +144,7 @@ impl Engine {
 
         nodes.push(RenderGraphNodeDesc {
             pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                include_aligned!(u32, concat!(env!("OUT_DIR"), "/Green.comp.spv"))
+                include_aligned!(u32, "../spv/Green.comp.spv")
                     .align_to::<u32>()
                     .1
             }),
@@ -154,7 +154,7 @@ impl Engine {
 
         nodes.push(RenderGraphNodeDesc {
             pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                include_aligned!(u32, concat!(env!("OUT_DIR"), "/Yellow.comp.spv"))
+                include_aligned!(u32, "../spv/Yellow.comp.spv")
                     .align_to::<u32>()
                     .1
             }),
