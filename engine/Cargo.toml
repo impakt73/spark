@@ -15,7 +15,3 @@ vk-mem              = "0.2"
 winit               = "0.22"
 vkutil              = { path = "../vkutil" }
 align-data          = "0.1"
-
-[build-dependencies]
-walkdir = "2"
-shaderc = "0.6"

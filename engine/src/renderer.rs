@@ -375,7 +375,7 @@ impl Renderer {
         )?;
 
         let imgui_vert_spv = unsafe {
-            include_aligned!(u32, concat!(env!("OUT_DIR"), "/ImguiTriangle.vert.spv"))
+            include_aligned!(u32, "../spv/ImguiTriangle.vert.spv")
                 .align_to::<u32>()
                 .1
         };
@@ -385,7 +385,7 @@ impl Renderer {
         )?;
 
         let imgui_frag_spv = unsafe {
-            include_aligned!(u32, concat!(env!("OUT_DIR"), "/ImguiTriangle.frag.spv"))
+            include_aligned!(u32, "../spv/ImguiTriangle.frag.spv")
                 .align_to::<u32>()
                 .1
         };
@@ -487,7 +487,7 @@ impl Renderer {
         )?;
 
         let graph_output_vert_spv = unsafe {
-            include_aligned!(u32, concat!(env!("OUT_DIR"), "/FullscreenPass.vert.spv"))
+            include_aligned!(u32, "../spv/FullscreenPass.vert.spv")
                 .align_to::<u32>()
                 .1
         };
@@ -497,7 +497,7 @@ impl Renderer {
         )?;
 
         let graph_output_frag_spv = unsafe {
-            include_aligned!(u32, concat!(env!("OUT_DIR"), "/CopyTexture.frag.spv"))
+            include_aligned!(u32, "../spv/CopyTexture.frag.spv")
                 .align_to::<u32>()
                 .1
         };
