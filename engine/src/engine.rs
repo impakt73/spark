@@ -12,14 +12,19 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::render_graph::{
-    RenderGraph, RenderGraphDesc, RenderGraphDispatchDimensions, RenderGraphImageParams,
-    RenderGraphNodeDesc, RenderGraphPipelineSource, RenderGraphResourceDesc,
-    RenderGraphResourceParams,
-};
 use crate::renderer::Renderer;
+use crate::{
+    audio_device,
+    render_graph::{
+        RenderGraph, RenderGraphDesc, RenderGraphDispatchDimensions, RenderGraphImageParams,
+        RenderGraphNodeDesc, RenderGraphPipelineSource, RenderGraphResourceDesc,
+        RenderGraphResourceParams,
+    },
+};
 
 use align_data::include_aligned;
+
+use crate::audio_device::AudioDevice;
 
 /// Helper for measuring frame timer
 ///
@@ -79,6 +84,7 @@ pub struct Engine {
     imgui_platform: Option<WinitPlatform>,
     graph: Option<RenderGraph>,
     renderer: Option<Renderer>,
+    audio_device: Option<AudioDevice>,
     last_frame_time: Instant,
     exit_requested: bool,
     timer: FrameTimer,
@@ -91,6 +97,7 @@ impl Engine {
             imgui_platform: None,
             graph: None,
             renderer: None,
+            audio_device: None,
             last_frame_time: Instant::now(),
             exit_requested: false,
             timer: FrameTimer::new(64),
@@ -115,6 +122,17 @@ impl Engine {
         self.imgui_context = Some(context);
         self.imgui_platform = Some(platform);
         self.renderer = Some(renderer);
+        self.audio_device = Some(AudioDevice::new().expect("Failed to create audio device"));
+        self.audio_device
+            .as_mut()
+            .unwrap()
+            .load_track(&String::from(
+                "C:/Users/Greg/Downloads/Nice_theme_-_Flow_1 (1).mp3",
+            ));
+        self.audio_device
+            .as_mut()
+            .unwrap()
+            .play();
 
         self.init_render_graph();
     }
