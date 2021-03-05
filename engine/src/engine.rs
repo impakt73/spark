@@ -108,7 +108,7 @@ impl Engine {
         let mut platform = WinitPlatform::init(&mut context);
         platform.attach_window(context.io_mut(), &window, HiDpiMode::Default);
 
-        let enable_validation = cfg!(debug_asserts);
+        let enable_validation = cfg!(debug_assertions);
         let renderer = Renderer::new(&window, enable_validation, &mut context)
             .expect("Failed to create renderer");
 
