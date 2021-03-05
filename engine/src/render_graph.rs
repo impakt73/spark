@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use ash::{version::DeviceV1_0, vk};
 
@@ -32,10 +35,12 @@ pub enum RenderGraphPipelineSource<'a> {
 }
 
 pub struct RenderGraphNodeDesc<'a> {
+    pub name: String,
     pub pipeline: RenderGraphPipelineSource<'a>,
     /// Referenced by shader like uTextures[Inputs[0]] where Inputs = push constants array
     pub refs: Vec<String>,
     pub dims: RenderGraphDispatchDimensions,
+    pub deps: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -115,8 +120,13 @@ pub struct RenderGraphFrameState {
     pub descriptor_set: vk::DescriptorSet,
 }
 
+pub struct RenderGraphBatch {
+    pub node_indices: Vec<usize>,
+}
+
 pub struct RenderGraph {
     pub nodes: Vec<RenderGraphNode>,
+    pub batches: Vec<RenderGraphBatch>,
     /// Used for lifetime purposes
     #[allow(dead_code)]
     descriptor_pool: VkDescriptorPool,
@@ -305,6 +315,7 @@ impl RenderGraph {
             }
         }
 
+        let mut node_mapping = HashMap::new();
         let mut nodes = Vec::new();
         for node_desc in &desc.nodes {
             let pipeline = match &node_desc.pipeline {
@@ -326,7 +337,55 @@ impl RenderGraph {
                 refs,
                 dims,
             };
+
+            // Track the index of each render graph node to help with dependency lookup later
+            node_mapping.insert(node_desc.name.clone(), nodes.len());
+
             nodes.push(node);
+        }
+
+        // Compute node batches
+        let mut batches = Vec::new();
+        let mut executed_nodes = HashSet::new();
+        let mut nodes_to_execute = desc.nodes.iter().enumerate().collect::<Vec<_>>();
+        while !nodes_to_execute.is_empty() {
+            let mut node_indices = Vec::new();
+            let num_nodes_to_execute = nodes_to_execute.len();
+            nodes_to_execute.retain(|(node_index, node_desc)| {
+                let mut is_ready = false;
+
+                if node_desc.deps.is_empty() {
+                    is_ready = true;
+                } else {
+                    let mut all_deps_met = true;
+                    for dep in &node_desc.deps {
+                        if !executed_nodes.contains(dep) {
+                            all_deps_met = false;
+                            break;
+                        }
+                    }
+                    if all_deps_met {
+                        is_ready = true;
+                    }
+                }
+
+                if is_ready {
+                    node_indices.push(*node_index);
+                }
+
+                !is_ready
+            });
+
+            // Mark the all nodes in the current batch as executed
+            for node_index in &node_indices {
+                executed_nodes.insert(desc.nodes[*node_index].name.clone());
+            }
+
+            batches.push(RenderGraphBatch { node_indices });
+
+            if num_nodes_to_execute == nodes_to_execute.len() {
+                return Err("Unable to satisfy render graph node dependencies!".into());
+            }
         }
 
         let mut output_image_idx = None;
@@ -339,6 +398,7 @@ impl RenderGraph {
 
         Ok(Self {
             nodes,
+            batches,
             descriptor_pool,
             frame_states,
             output_image_idx,

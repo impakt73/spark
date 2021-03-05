@@ -133,6 +133,7 @@ impl Engine {
         let mut nodes = Vec::new();
 
         nodes.push(RenderGraphNodeDesc {
+            name: String::from("Red"),
             pipeline: RenderGraphPipelineSource::Buffer(unsafe {
                 include_aligned!(u32, "../spv/Red.comp.spv")
                     .align_to::<u32>()
@@ -140,9 +141,11 @@ impl Engine {
             }),
             refs: vec![String::from("RedImage")],
             dims: dispatch_dims,
+            deps: Vec::new(),
         });
 
         nodes.push(RenderGraphNodeDesc {
+            name: String::from("Green"),
             pipeline: RenderGraphPipelineSource::Buffer(unsafe {
                 include_aligned!(u32, "../spv/Green.comp.spv")
                     .align_to::<u32>()
@@ -150,9 +153,11 @@ impl Engine {
             }),
             refs: vec![String::from("GreenImage")],
             dims: dispatch_dims,
+            deps: Vec::new(),
         });
 
         nodes.push(RenderGraphNodeDesc {
+            name: String::from("Yellow"),
             pipeline: RenderGraphPipelineSource::Buffer(unsafe {
                 include_aligned!(u32, "../spv/Yellow.comp.spv")
                     .align_to::<u32>()
@@ -164,6 +169,7 @@ impl Engine {
                 String::from("YellowImage"),
             ],
             dims: dispatch_dims,
+            deps: vec![String::from("Red"), String::from("Green")],
         });
 
         let mut resources = Vec::new();

@@ -1307,35 +1307,39 @@ impl Renderer {
                 &[],
             );
 
-            for node in &graph.nodes {
-                device.cmd_bind_pipeline(
-                    cmd_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    node.pipeline.raw(),
-                );
+            for batch in &graph.batches {
+                for node_index in &batch.node_indices {
+                    let node = &graph.nodes[*node_index];
 
-                // The texture slot index is stored inside the ImGui texture id
-                let push_constant_1 = node.get_ref(0).index();
-                let push_constant_2 = node.get_ref(1).index();
-                let push_constant_3 = node.get_ref(2).index();
-                let push_constants: [u32; 4] =
-                    [0, push_constant_1, push_constant_2, push_constant_3];
-                device.cmd_push_constants(
-                    cmd_buffer,
-                    self.pipeline_layout.raw(),
-                    vk::ShaderStageFlags::VERTEX
-                        | vk::ShaderStageFlags::FRAGMENT
-                        | vk::ShaderStageFlags::COMPUTE,
-                    0,
-                    &push_constants.align_to::<u8>().1,
-                );
+                    device.cmd_bind_pipeline(
+                        cmd_buffer,
+                        vk::PipelineBindPoint::COMPUTE,
+                        node.pipeline.raw(),
+                    );
 
-                device.cmd_dispatch(
-                    cmd_buffer,
-                    node.dims.num_groups_x,
-                    node.dims.num_groups_y,
-                    node.dims.num_groups_z,
-                );
+                    // The texture slot index is stored inside the ImGui texture id
+                    let push_constant_1 = node.get_ref(0).index();
+                    let push_constant_2 = node.get_ref(1).index();
+                    let push_constant_3 = node.get_ref(2).index();
+                    let push_constants: [u32; 4] =
+                        [0, push_constant_1, push_constant_2, push_constant_3];
+                    device.cmd_push_constants(
+                        cmd_buffer,
+                        self.pipeline_layout.raw(),
+                        vk::ShaderStageFlags::VERTEX
+                            | vk::ShaderStageFlags::FRAGMENT
+                            | vk::ShaderStageFlags::COMPUTE,
+                        0,
+                        &push_constants.align_to::<u8>().1,
+                    );
+
+                    device.cmd_dispatch(
+                        cmd_buffer,
+                        node.dims.num_groups_x,
+                        node.dims.num_groups_y,
+                        node.dims.num_groups_z,
+                    );
+                }
 
                 // TODO: Allow appropriate nodes to overlap execution once dependencies are implemented.
                 device.cmd_pipeline_barrier(
