@@ -297,7 +297,6 @@ impl Engine {
 
         let now = Instant::now();
         let delta_time = now - self.last_frame_time;
-        self.input_state.next_frame();
 
         self.imgui_context
             .as_mut()
@@ -377,6 +376,8 @@ impl Engine {
         self.renderer.as_mut().unwrap().end_render();
 
         self.renderer.as_mut().unwrap().end_frame();
+
+        self.input_state.next_frame();
     }
 
     pub fn run(mut self) -> ! {
