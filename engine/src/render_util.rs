@@ -20,6 +20,7 @@ impl ConstantDataWriter {
     pub fn begin_frame(&mut self, p_buffer: *mut u8, buffer_size: usize) {
         self.p_buffer = p_buffer;
         self.buffer_size = buffer_size;
+        self.bytes_written = 0;
     }
 
     pub fn end_frame(&mut self) -> usize {
