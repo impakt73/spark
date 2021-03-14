@@ -423,15 +423,8 @@ impl Engine {
             .prepare_render(&ui, &window);
         let draw_data = ui.render();
 
-        self.renderer
-            .as_mut()
-            .unwrap()
-            .execute_graph(self.graph.as_ref().unwrap())
-            .expect("Failed to execute render graph");
-
-        self.renderer.as_mut().unwrap().begin_render();
-
         let cur_swapchain_idx = self.renderer.as_ref().unwrap().get_cur_swapchain_idx();
+        let mut render_graph_image = false;
         if let Some(output_image_view) = self
             .graph
             .as_ref()
@@ -441,7 +434,23 @@ impl Engine {
             self.renderer
                 .as_mut()
                 .unwrap()
-                .render_graph_image(output_image_view);
+                .update_graph_image(output_image_view);
+
+            render_graph_image = true;
+        }
+
+        let cur_time = self.audio_track.as_ref().unwrap().get_position().unwrap();
+
+        self.renderer
+            .as_mut()
+            .unwrap()
+            .execute_graph(self.graph.as_ref().unwrap(), &cur_time)
+            .expect("Failed to execute render graph");
+
+        self.renderer.as_mut().unwrap().begin_render();
+
+        if render_graph_image {
+            self.renderer.as_mut().unwrap().render_graph_image();
         }
 
         self.renderer.as_mut().unwrap().render_ui(draw_data);
