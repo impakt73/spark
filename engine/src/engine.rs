@@ -5,19 +5,20 @@ use std::{
     time::{Duration, Instant},
 };
 use winit::{
-    event::{
-        DeviceEvent, ElementState, Event, KeyboardInput, StartCause, VirtualKeyCode, WindowEvent,
-    },
+    event::{DeviceEvent, Event, KeyboardInput, StartCause, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
 
-use crate::render_graph::{
-    RenderGraph, RenderGraphDesc, RenderGraphDispatchDimensions, RenderGraphImageParams,
-    RenderGraphNodeDesc, RenderGraphPipelineSource, RenderGraphResourceDesc,
-    RenderGraphResourceParams,
-};
 use crate::renderer::Renderer;
+use crate::{
+    input_state::InputState,
+    render_graph::{
+        RenderGraph, RenderGraphDesc, RenderGraphDispatchDimensions, RenderGraphImageParams,
+        RenderGraphNodeDesc, RenderGraphPipelineSource, RenderGraphResourceDesc,
+        RenderGraphResourceParams,
+    },
+};
 
 use align_data::include_aligned;
 
@@ -79,6 +80,7 @@ pub struct Engine {
     imgui_platform: Option<WinitPlatform>,
     graph: Option<RenderGraph>,
     renderer: Option<Renderer>,
+    input_state: InputState,
     last_frame_time: Instant,
     exit_requested: bool,
     timer: FrameTimer,
@@ -91,6 +93,7 @@ impl Engine {
             imgui_platform: None,
             graph: None,
             renderer: None,
+            input_state: InputState::default(),
             last_frame_time: Instant::now(),
             exit_requested: false,
             timer: FrameTimer::new(64),
@@ -269,24 +272,23 @@ impl Engine {
                     Event::LoopDestroyed => {
                         self.destroy();
                     }
-                    event => match event {
-                        Event::DeviceEvent { event, .. } => match event {
-                            DeviceEvent::Key(KeyboardInput {
-                                virtual_keycode: Some(keycode),
-                                state,
-                                ..
-                            }) => match (keycode, state) {
-                                (VirtualKeyCode::Escape, ElementState::Released) => {
-                                    *control_flow = ControlFlow::Exit
-                                }
-                                _ => (),
-                            },
-                            _ => (),
-                        },
-                        _ => {}
-                    },
+                    Event::DeviceEvent { event, .. } => {
+                        if let DeviceEvent::Key(KeyboardInput {
+                            virtual_keycode: Some(keycode),
+                            state,
+                            ..
+                        }) = event
+                        {
+                            self.input_state.update_key_state(*keycode, *state);
+                        }
+                    }
+                    _ => {}
                 }
             }
+        }
+
+        if self.input_state.is_key_pressed(VirtualKeyCode::Escape) {
+            *control_flow = ControlFlow::Exit;
         }
     }
 
@@ -295,6 +297,7 @@ impl Engine {
 
         let now = Instant::now();
         let delta_time = now - self.last_frame_time;
+
         self.imgui_context
             .as_mut()
             .unwrap()
@@ -373,6 +376,8 @@ impl Engine {
         self.renderer.as_mut().unwrap().end_render();
 
         self.renderer.as_mut().unwrap().end_frame();
+
+        self.input_state.next_frame();
     }
 
     pub fn run(mut self) -> ! {
