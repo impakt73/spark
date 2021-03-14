@@ -888,10 +888,11 @@ impl VkDescriptorPool {
         Ok(result[0])
     }
 
-    pub fn free_descriptor_set(&self, descriptor_set: vk::DescriptorSet) {
+    pub fn free_descriptor_set(&self, descriptor_set: vk::DescriptorSet) -> Result<()> {
         unsafe {
-            unwrap_device(&self.device).free_descriptor_sets(self.inner, &[descriptor_set]);
+            unwrap_device(&self.device).free_descriptor_sets(self.inner, &[descriptor_set])?;
         }
+        Ok(())
     }
 }
 
