@@ -10,6 +10,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use crate::audio_device::{AudioDevice, AudioTrack};
 use crate::renderer::Renderer;
 use crate::{
     input_state::InputState,
@@ -75,11 +76,21 @@ impl FrameTimer {
     }
 }
 
+/// Returns a text representation of a duration suitable for display in the UI
+fn format_duration(duration: &Duration) -> String {
+    let total_secs = duration.as_secs_f64();
+    let mins = (total_secs / 60.0).floor();
+    let secs = total_secs % 60.0;
+    format!("{:.0}:{:0>5.2}", mins, secs)
+}
+
 pub struct Engine {
     imgui_context: Option<imgui::Context>,
     imgui_platform: Option<WinitPlatform>,
     graph: Option<RenderGraph>,
     renderer: Option<Renderer>,
+    audio_track: Option<AudioTrack>,
+    audio_device: Option<AudioDevice>,
     input_state: InputState,
     last_frame_time: Instant,
     exit_requested: bool,
@@ -93,6 +104,8 @@ impl Engine {
             imgui_platform: None,
             graph: None,
             renderer: None,
+            audio_track: None,
+            audio_device: None,
             input_state: InputState::default(),
             last_frame_time: Instant::now(),
             exit_requested: false,
@@ -111,12 +124,18 @@ impl Engine {
         let mut platform = WinitPlatform::init(&mut context);
         platform.attach_window(context.io_mut(), &window, HiDpiMode::Default);
 
+        let audio_device = AudioDevice::new().expect("Failed to create audio device");
+        let audio_track =
+            AudioTrack::from_path("res/audio/test.mp3").expect("Failed to create audio track");
+
         let enable_validation = cfg!(debug_assertions);
         let renderer = Renderer::new(&window, enable_validation, &mut context)
             .expect("Failed to create renderer");
 
         self.imgui_context = Some(context);
         self.imgui_platform = Some(platform);
+        self.audio_track = Some(audio_track);
+        self.audio_device = Some(audio_device);
         self.renderer = Some(renderer);
 
         self.init_render_graph();
@@ -219,6 +238,9 @@ impl Engine {
 
     fn destroy(&mut self) {
         self.renderer.as_mut().unwrap().wait_for_idle();
+        if let Err(err) = self.audio_track.as_mut().unwrap().stop() {
+            println!("Failed to stop audio track: {}", err);
+        }
     }
 
     fn resize(&mut self, window: &Window) {
@@ -298,6 +320,50 @@ impl Engine {
         let now = Instant::now();
         let delta_time = now - self.last_frame_time;
 
+        // Audio track control
+        if self.input_state.is_key_pressed(VirtualKeyCode::Space)
+            && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
+        {
+            if let Err(err) = self.audio_track.as_mut().unwrap().toggle_pause() {
+                println!("Failed to toggle audio track playback: {}", err);
+            }
+        }
+        if !self.audio_track.as_ref().unwrap().is_playing() {
+            let mut modifier = 0.05;
+            if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
+                || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
+            {
+                if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
+                    || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
+                {
+                    modifier = 25.0;
+                } else {
+                    modifier = 5.0;
+                }
+            }
+
+            let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
+            if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
+                if let Err(err) = self
+                    .audio_track
+                    .as_mut()
+                    .unwrap()
+                    .subtract_position_offset(&offset)
+                {
+                    println!("Failed to rewind audio track: {}", err);
+                }
+            } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
+                if let Err(err) = self
+                    .audio_track
+                    .as_mut()
+                    .unwrap()
+                    .add_position_offset(&offset)
+                {
+                    println!("Failed to fast-forward audio track: {}", err);
+                }
+            }
+        }
+
         self.imgui_context
             .as_mut()
             .unwrap()
@@ -341,6 +407,13 @@ impl Engine {
                     .graph_size([64.0, 20.0])
                     .build();
             }
+            let audio_pos = self.audio_track.as_ref().unwrap().get_position().unwrap();
+            let audio_length = self.audio_track.as_ref().unwrap().get_length();
+            ui.text(format!(
+                "Track: {} [{}]",
+                format_duration(&audio_pos),
+                format_duration(&audio_length)
+            ));
             main_menu_bar.end(&ui);
         }
 
