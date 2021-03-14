@@ -8,6 +8,7 @@ use std::{
     fs::File,
     io::Read,
     sync::{Arc, Weak},
+    time::Duration,
 };
 
 use imgui::internal::RawWrapper;
@@ -893,7 +894,29 @@ impl Renderer {
         &self.graph_descriptor_set_layout
     }
 
-    pub fn render_graph_image(&mut self, image_view: &VkImageView) {
+    pub fn update_graph_image(&mut self, image_view: &VkImageView) {
+        let frame_state = &mut self.frame_states[self.cur_swapchain_idx];
+
+        let device = self.device.raw().upgrade().unwrap();
+
+        unsafe {
+            device.update_descriptor_sets(
+                &[vk::WriteDescriptorSet::builder()
+                    .dst_set(frame_state.descriptor_set)
+                    .dst_binding(2)
+                    .dst_array_element(RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX as u32)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&[vk::DescriptorImageInfo::builder()
+                        .image_view(image_view.raw())
+                        .image_layout(vk::ImageLayout::GENERAL)
+                        .build()])
+                    .build()],
+                &[],
+            );
+        }
+    }
+
+    pub fn render_graph_image(&mut self) {
         let frame_state = &mut self.frame_states[self.cur_swapchain_idx];
 
         let device = self.device.raw().upgrade().unwrap();
@@ -931,20 +954,6 @@ impl Renderer {
                             .build(),
                     )
                     .build()],
-            );
-
-            device.update_descriptor_sets(
-                &[vk::WriteDescriptorSet::builder()
-                    .dst_set(frame_state.descriptor_set)
-                    .dst_binding(2)
-                    .dst_array_element(RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX as u32)
-                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                    .image_info(&[vk::DescriptorImageInfo::builder()
-                        .image_view(image_view.raw())
-                        .image_layout(vk::ImageLayout::GENERAL)
-                        .build()])
-                    .build()],
-                &[],
             );
 
             let push_constant_0 = (RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX & 0xff) << 24;
@@ -1232,13 +1241,16 @@ impl Renderer {
         self.create_compute_pipeline_from_buffer(&spv)
     }
 
-    pub fn execute_graph(&mut self, graph: &RenderGraph) -> Result<()> {
+    pub fn execute_graph(&mut self, graph: &RenderGraph, cur_time: &Duration) -> Result<()> {
         let renderer_frame_state = &mut self.frame_states[self.cur_swapchain_idx];
 
         let graph_frame_state = &graph.frame_states[self.cur_swapchain_idx];
 
         let device = self.device.raw().upgrade().unwrap();
         let cmd_buffer = renderer_frame_state.cmd_buffer;
+
+        let cur_time_bytes = cur_time.as_secs_f32().to_le_bytes();
+        self.constant_writer.write_all(&cur_time_bytes).unwrap();
 
         unsafe {
             // Initialize all resources for the current frame state

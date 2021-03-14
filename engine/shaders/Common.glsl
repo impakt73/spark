@@ -26,3 +26,6 @@ uint ShaderIoSlot2()
 {
     return uPushConstants.Constant3;
 }
+
+// Static Constant Memory Offsets
+const uint kCurrentTimeStaticOffset = 0;
