@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use winit::{
-    event::{DeviceEvent, Event, KeyboardInput, StartCause, VirtualKeyCode, WindowEvent},
+    event::{Event, StartCause, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
@@ -282,6 +282,11 @@ impl Engine {
                         WindowEvent::Resized(_new_size) => {
                             self.resize(window);
                         }
+                        WindowEvent::KeyboardInput { input, .. } => {
+                            if let Some(keycode) = input.virtual_keycode {
+                                self.input_state.update_key_state(keycode, input.state);
+                            }
+                        }
                         _ => {}
                     },
                     Event::MainEventsCleared => {
@@ -293,16 +298,6 @@ impl Engine {
                     }
                     Event::LoopDestroyed => {
                         self.destroy();
-                    }
-                    Event::DeviceEvent { event, .. } => {
-                        if let DeviceEvent::Key(KeyboardInput {
-                            virtual_keycode: Some(keycode),
-                            state,
-                            ..
-                        }) = event
-                        {
-                            self.input_state.update_key_state(*keycode, *state);
-                        }
                     }
                     _ => {}
                 }
