@@ -157,7 +157,8 @@ pub struct Renderer {
     allocator: Arc<vk_mem::Allocator>,
     surface: VkSurface,
     device: VkDevice,
-    _debug_messenger: Option<VkDebugMessenger>,
+    #[allow(dead_code)]
+    debug_messenger: Option<VkDebugMessenger>,
     instance: VkInstance,
 }
 
@@ -169,7 +170,7 @@ impl Renderer {
     ) -> Result<Self> {
         let instance = VkInstance::new(window, enable_validation)?;
 
-        let _debug_messenger = if enable_validation {
+        let debug_messenger = if instance.is_debug_msg_enabled() {
             Some(VkDebugMessenger::new(&instance)?)
         } else {
             None
@@ -630,7 +631,7 @@ impl Renderer {
             allocator,
             surface,
             device,
-            _debug_messenger,
+            debug_messenger,
             instance,
         })
     }

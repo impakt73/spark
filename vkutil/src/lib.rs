@@ -96,29 +96,55 @@ impl ComputePipeline {
 }
 
 /// Returns a vector of all desired instance extensions
-fn select_instance_extensions(surface_extensions: Vec<CString>) -> Vec<CString> {
+fn select_instance_extensions(
+    entry: &ash::Entry,
+    surface_extensions: Vec<CString>,
+    enable_validation: bool,
+) -> Result<(Vec<CString>, bool)> {
+    let supported_exts = entry.enumerate_instance_extension_properties()?;
+
     let mut exts = Vec::new();
 
     // Add in all required surface extensions
     exts.extend(surface_extensions);
 
-    // Add the debug utils extension
-    let debug_utils_ext_name = CString::new(ext::DebugUtils::name().to_bytes()).unwrap();
-    exts.push(debug_utils_ext_name);
+    // If the caller wants API validation, make sure we try to add the debug utils extension here
+    let mut debug_msg_enabled = false;
+    if enable_validation {
+        let dbg_msg_supported = supported_exts.iter().any(|ext| unsafe {
+            libc::strcmp(
+                ext.extension_name.as_ptr(),
+                ext::DebugUtils::name().as_ptr(),
+            ) == 0
+        });
+        if dbg_msg_supported {
+            let debug_utils_ext_name = CString::new(ext::DebugUtils::name().to_bytes())?;
+            exts.push(debug_utils_ext_name);
+            debug_msg_enabled = true;
+        }
+    }
 
-    exts
+    Ok((exts, debug_msg_enabled))
 }
 
 /// Returns a vector of all desired instance layers
-fn select_instance_layers(enable_validation: bool) -> Vec<CString> {
-    let mut exts = Vec::new();
+fn select_instance_layers(entry: &ash::Entry, enable_validation: bool) -> Result<Vec<CString>> {
+    let supported_layers = entry.enumerate_instance_layer_properties()?;
 
-    // If the caller wants API validation, make sure we add the instance layer here
+    let mut layers = Vec::new();
+
+    // If the caller wants API validation, make sure we try to add the instance layer here
+    let validation_layer_name = CString::new("VK_LAYER_KHRONOS_validation")?;
     if enable_validation {
-        exts.push(CString::new("VK_LAYER_KHRONOS_validation").unwrap());
+        let validation_supported = supported_layers.iter().any(|layer| unsafe {
+            libc::strcmp(layer.layer_name.as_ptr(), validation_layer_name.as_ptr()) == 0
+        });
+        if validation_supported {
+            layers.push(validation_layer_name);
+        }
     }
 
-    exts
+    Ok(layers)
 }
 
 /// Returns a vector of all desired device extensions
@@ -165,6 +191,7 @@ impl Drop for VkSurface {
 pub struct VkInstance {
     inner: ash::Instance,
     entry: ash::Entry,
+    debug_msg_enabled: bool,
 }
 
 impl VkInstance {
@@ -176,12 +203,13 @@ impl VkInstance {
                 .iter()
                 .map(|ext| CString::new(ext.to_bytes()).unwrap())
                 .collect::<Vec<_>>();
-            let instance_extension_strings = select_instance_extensions(surface_extensions);
+            let (instance_extension_strings, debug_msg_enabled) =
+                select_instance_extensions(&entry, surface_extensions, enable_validation)?;
             let instance_extensions = instance_extension_strings
                 .iter()
                 .map(|ext| ext.as_ptr())
                 .collect::<Vec<_>>();
-            let instance_layer_strings = select_instance_layers(enable_validation);
+            let instance_layer_strings = select_instance_layers(&entry, enable_validation)?;
             let instance_layers = instance_layer_strings
                 .iter()
                 .map(|ext| ext.as_ptr())
@@ -197,12 +225,17 @@ impl VkInstance {
             Ok(Self {
                 inner: instance,
                 entry,
+                debug_msg_enabled,
             })
         }
     }
 
     pub fn raw(&self) -> &ash::Instance {
         &self.inner
+    }
+
+    pub fn is_debug_msg_enabled(&self) -> bool {
+        self.debug_msg_enabled
     }
 }
 
@@ -225,7 +258,8 @@ impl VkDebugMessenger {
             let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
                 .message_severity(
                     vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
                 )
                 .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
                 .pfn_user_callback(Some(vulkan_debug_callback));
