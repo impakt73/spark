@@ -16,3 +16,4 @@ winit               = "0.24"
 vkutil              = { path = "../vkutil" }
 align-data          = "0.1"
 bass-sys            = { git = "https://github.com/impakt73/bass-sys.git", branch = "main" }
+ultraviolet         = { version = "0.7", features = [ "int" ] }

@@ -11,8 +11,8 @@ void main()
     const uint outputImgIdx = ShaderIoSlot0();
 
     const ivec2 centerTexCoord = ivec2(gl_GlobalInvocationID.xy);
-    const ivec2 texDimensions = imageSize(uImages[outputImgIdx]);
-    if ((centerTexCoord.x < texDimensions.x) && (centerTexCoord.y < texDimensions.y))
+    const uvec2 resolution = READ_BUFFER_UINT2(uFrameMemoryRO, kSwapchainResolutionUvec2StaticOffset);
+    if ((centerTexCoord.x < resolution.x) && (centerTexCoord.y < resolution.y))
     {
         imageStore(uImages[outputImgIdx], centerTexCoord, vec4(1.0, 0.0, 0.0, 1.0));
     }

@@ -15,8 +15,8 @@ void main()
     const uint outputImgIdx = ShaderIoSlot2();
 
     const ivec2 centerTexCoord = ivec2(gl_GlobalInvocationID.xy);
-    const ivec2 texDimensions = imageSize(uImages[outputImgIdx]);
-    if ((centerTexCoord.x < texDimensions.x) && (centerTexCoord.y < texDimensions.y))
+    const uvec2 resolution = READ_BUFFER_UINT2(uFrameMemoryRO, kSwapchainResolutionUvec2StaticOffset);
+    if ((centerTexCoord.x < resolution.x) && (centerTexCoord.y < resolution.y))
     {
         const float interpA = (sin(currentTime) * 0.5 + 0.5);
         const float interpB = (cos(currentTime) * 0.5 + 0.5);

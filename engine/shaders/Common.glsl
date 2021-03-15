@@ -29,3 +29,5 @@ uint ShaderIoSlot2()
 
 // Static Constant Memory Offsets
 const uint kCurrentTimeStaticOffset = 0;
+const uint kSwapchainResolutionVec2StaticOffset = 1;
+const uint kSwapchainResolutionUvec2StaticOffset = 3;
