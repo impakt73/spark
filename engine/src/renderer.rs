@@ -24,6 +24,8 @@ use std::io;
 use std::io::Write;
 
 use align_data::include_aligned;
+use ultraviolet::int::UVec2;
+use ultraviolet::vec::Vec2;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -1251,6 +1253,22 @@ impl Renderer {
 
         let cur_time_bytes = cur_time.as_secs_f32().to_le_bytes();
         self.constant_writer.write_all(&cur_time_bytes).unwrap();
+
+        let swapchain_res_float = Vec2::new(
+            self.swapchain.surface_resolution.width as f32,
+            self.swapchain.surface_resolution.height as f32,
+        );
+        self.constant_writer
+            .write_all(swapchain_res_float.as_byte_slice())
+            .unwrap();
+
+        let swapchain_res_uint = UVec2::new(
+            self.swapchain.surface_resolution.width,
+            self.swapchain.surface_resolution.height,
+        );
+        self.constant_writer
+            .write_all(swapchain_res_uint.as_byte_slice())
+            .unwrap();
 
         unsafe {
             // Initialize all resources for the current frame state
