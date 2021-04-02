@@ -130,16 +130,15 @@ impl Engine {
         }
     }
 
-    pub fn init(&mut self) {
+    pub fn reload_scene(&mut self) {
+        // Idle the renderer before we modify any rendering resources
+        self.renderer.wait_for_idle();
+
         self.audio_track = Some(
             AudioTrack::from_path(self.audio_device.clone(), "res/audio/test.mp3")
                 .expect("Failed to create audio track"),
         );
 
-        self.init_render_graph();
-    }
-
-    fn init_render_graph(&mut self) {
         // Test graph
         let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
 
@@ -245,7 +244,7 @@ impl Engine {
         //       This will be fixed in a future change.
         self.renderer.recreate_swapchain(&window).unwrap();
 
-        self.init_render_graph();
+        self.reload_scene();
     }
 
     fn handle_event(
@@ -258,7 +257,7 @@ impl Engine {
             Event::NewEvents(StartCause::Init) => {
                 *control_flow = ControlFlow::Poll;
 
-                self.init();
+                self.reload_scene();
             }
             _ => {
                 self.imgui_platform
@@ -353,6 +352,7 @@ impl Engine {
         let avg_frame_time_us = self.timer.calculate_average().as_micros() as f64;
 
         // Render UI
+        let mut reload_scene = false;
         if let Some(main_menu_bar) = ui.begin_main_menu_bar() {
             if let Some(file_menu) = ui.begin_menu(imgui::im_str!("File"), true) {
                 if imgui::MenuItem::new(imgui::im_str!("Exit")).build(&ui) {
@@ -360,6 +360,14 @@ impl Engine {
                 }
 
                 file_menu.end(&ui);
+            }
+
+            if let Some(scene_menu) = ui.begin_menu(imgui::im_str!("Scene"), true) {
+                if imgui::MenuItem::new(imgui::im_str!("Reload")).build(&ui) {
+                    reload_scene = true;
+                }
+
+                scene_menu.end(&ui);
             }
 
             ui.text(format!("CPU: {:.2}ms", avg_frame_time_us / 1000.0));
@@ -425,6 +433,11 @@ impl Engine {
         self.renderer.end_frame();
 
         self.input_state.next_frame();
+
+        // If a scene reload was requested via the UI, perform the operation once the current frame has been submitted
+        if reload_scene {
+            self.reload_scene();
+        }
     }
 
     pub fn run() -> ! {
