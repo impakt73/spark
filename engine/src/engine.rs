@@ -2,6 +2,7 @@ use ash::vk;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::{
     collections::VecDeque,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use winit::{
@@ -90,9 +91,7 @@ pub struct Engine {
     graph: Option<RenderGraph>,
     renderer: Renderer,
     audio_track: Option<AudioTrack>,
-    // TODO: The audio track should have a dependency on the audio device
-    #[allow(dead_code)]
-    audio_device: AudioDevice,
+    audio_device: Arc<AudioDevice>,
     input_state: InputState,
     last_frame_time: Instant,
     exit_requested: bool,
@@ -111,7 +110,7 @@ impl Engine {
         let mut imgui_platform = WinitPlatform::init(&mut imgui_context);
         imgui_platform.attach_window(imgui_context.io_mut(), &window, HiDpiMode::Default);
 
-        let audio_device = AudioDevice::new().expect("Failed to create audio device");
+        let audio_device = Arc::new(AudioDevice::new().expect("Failed to create audio device"));
 
         let enable_validation = cfg!(debug_assertions);
         let renderer = Renderer::new(&window, enable_validation, &mut imgui_context)
@@ -132,8 +131,8 @@ impl Engine {
     }
 
     pub fn init(&mut self) {
-        let audio_track =
-            AudioTrack::from_path("res/audio/test.mp3").expect("Failed to create audio track");
+        let audio_track = AudioTrack::from_path(self.audio_device.clone(), "res/audio/test.mp3")
+            .expect("Failed to create audio track");
 
         self.audio_track = Some(audio_track);
 

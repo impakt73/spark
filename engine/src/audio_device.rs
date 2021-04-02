@@ -6,6 +6,7 @@ use std::{
     fmt,
     path::Path,
     ptr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -111,10 +112,17 @@ fn calc_stream_duration(stream: sys::HSTREAM) -> AudioResult<Duration> {
 pub struct AudioTrack {
     stream: sys::HSTREAM,
     duration: Duration,
+
+    // Used to keep the associated audio device alive
+    #[allow(dead_code)]
+    device: Arc<AudioDevice>,
 }
 
 impl AudioTrack {
-    pub fn from_path(path: &(impl AsRef<Path> + ?Sized)) -> AudioResult<Self> {
+    pub fn from_path(
+        device: Arc<AudioDevice>,
+        path: &(impl AsRef<Path> + ?Sized),
+    ) -> AudioResult<Self> {
         let path = ffi::CString::new(path.as_ref().to_str().unwrap()).unwrap();
         let stream = unsafe {
             sys_call_handle!(sys::BASS_StreamCreateFile(
@@ -126,7 +134,11 @@ impl AudioTrack {
             ))
         }?;
         let duration = calc_stream_duration(stream)?;
-        Ok(Self { stream, duration })
+        Ok(Self {
+            stream,
+            duration,
+            device,
+        })
     }
 
     pub fn play(&mut self) -> AudioResult<()> {
