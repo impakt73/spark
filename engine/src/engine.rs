@@ -398,26 +398,23 @@ impl Engine {
         let draw_data = ui.render();
 
         let cur_swapchain_idx = self.renderer.get_cur_swapchain_idx();
-        let mut render_graph_image = false;
-        if let Some(output_image_view) = self
-            .graph
-            .as_ref()
-            .unwrap()
-            .get_output_image(cur_swapchain_idx)
-        {
-            self.renderer.update_graph_image(output_image_view);
-
-            render_graph_image = true;
-        }
-
         let cur_time = self
             .audio_track
             .as_ref()
             .map_or(Duration::default(), |track| track.get_position().unwrap());
 
-        self.renderer
-            .execute_graph(self.graph.as_ref().unwrap(), &cur_time)
-            .expect("Failed to execute render graph");
+        let mut render_graph_image = false;
+        if let Some(graph) = &mut self.graph {
+            if let Some(output_image_view) = graph.get_output_image(cur_swapchain_idx) {
+                self.renderer.update_graph_image(output_image_view);
+
+                render_graph_image = true;
+            }
+
+            self.renderer
+                .execute_graph(graph, &cur_time)
+                .expect("Failed to execute render graph");
+        }
 
         self.renderer.begin_render();
 
