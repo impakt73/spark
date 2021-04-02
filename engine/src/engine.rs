@@ -149,76 +149,72 @@ impl Engine {
             num_groups_z: 1,
         };
 
-        let mut nodes = Vec::new();
+        let nodes = vec![
+            RenderGraphNodeDesc {
+                name: String::from("Red"),
+                pipeline: RenderGraphPipelineSource::Buffer(unsafe {
+                    include_aligned!(u32, "../spv/Red.comp.spv")
+                        .align_to::<u32>()
+                        .1
+                }),
+                refs: vec![String::from("RedImage")],
+                dims: dispatch_dims,
+                deps: Vec::new(),
+            },
+            RenderGraphNodeDesc {
+                name: String::from("Green"),
+                pipeline: RenderGraphPipelineSource::Buffer(unsafe {
+                    include_aligned!(u32, "../spv/Green.comp.spv")
+                        .align_to::<u32>()
+                        .1
+                }),
+                refs: vec![String::from("GreenImage")],
+                dims: dispatch_dims,
+                deps: Vec::new(),
+            },
+            RenderGraphNodeDesc {
+                name: String::from("Yellow"),
+                pipeline: RenderGraphPipelineSource::Buffer(unsafe {
+                    include_aligned!(u32, "../spv/Yellow.comp.spv")
+                        .align_to::<u32>()
+                        .1
+                }),
+                refs: vec![
+                    String::from("RedImage"),
+                    String::from("GreenImage"),
+                    String::from("YellowImage"),
+                ],
+                dims: dispatch_dims,
+                deps: vec![String::from("Red"), String::from("Green")],
+            },
+        ];
 
-        nodes.push(RenderGraphNodeDesc {
-            name: String::from("Red"),
-            pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                include_aligned!(u32, "../spv/Red.comp.spv")
-                    .align_to::<u32>()
-                    .1
-            }),
-            refs: vec![String::from("RedImage")],
-            dims: dispatch_dims,
-            deps: Vec::new(),
-        });
-
-        nodes.push(RenderGraphNodeDesc {
-            name: String::from("Green"),
-            pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                include_aligned!(u32, "../spv/Green.comp.spv")
-                    .align_to::<u32>()
-                    .1
-            }),
-            refs: vec![String::from("GreenImage")],
-            dims: dispatch_dims,
-            deps: Vec::new(),
-        });
-
-        nodes.push(RenderGraphNodeDesc {
-            name: String::from("Yellow"),
-            pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                include_aligned!(u32, "../spv/Yellow.comp.spv")
-                    .align_to::<u32>()
-                    .1
-            }),
-            refs: vec![
-                String::from("RedImage"),
-                String::from("GreenImage"),
-                String::from("YellowImage"),
-            ],
-            dims: dispatch_dims,
-            deps: vec![String::from("Red"), String::from("Green")],
-        });
-
-        let mut resources = Vec::new();
-
-        resources.push(RenderGraphResourceDesc {
-            name: String::from("RedImage"),
-            params: RenderGraphResourceParams::Image(RenderGraphImageParams {
-                width: swapchain_width,
-                height: swapchain_height,
-                format: vk::Format::R8G8B8A8_UNORM,
-            }),
-        });
-
-        resources.push(RenderGraphResourceDesc {
-            name: String::from("GreenImage"),
-            params: RenderGraphResourceParams::Image(RenderGraphImageParams {
-                width: swapchain_width,
-                height: swapchain_height,
-                format: vk::Format::R8G8B8A8_UNORM,
-            }),
-        });
-
-        resources.push(RenderGraphResourceDesc {
-            name: String::from("YellowImage"),
-            params: RenderGraphResourceParams::Image(RenderGraphImageParams {
-                width: swapchain_width,
-                height: swapchain_height,
-                format: vk::Format::R8G8B8A8_UNORM,
-            }),
-        });
+        let resources = vec![
+            RenderGraphResourceDesc {
+                name: String::from("RedImage"),
+                params: RenderGraphResourceParams::Image(RenderGraphImageParams {
+                    width: swapchain_width,
+                    height: swapchain_height,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                }),
+            },
+            RenderGraphResourceDesc {
+                name: String::from("GreenImage"),
+                params: RenderGraphResourceParams::Image(RenderGraphImageParams {
+                    width: swapchain_width,
+                    height: swapchain_height,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                }),
+            },
+            RenderGraphResourceDesc {
+                name: String::from("YellowImage"),
+                params: RenderGraphResourceParams::Image(RenderGraphImageParams {
+                    width: swapchain_width,
+                    height: swapchain_height,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                }),
+            },
+        ];
 
         let output_image_name = Some(String::from("YellowImage"));
 
