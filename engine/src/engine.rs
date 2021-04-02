@@ -85,12 +85,14 @@ fn format_duration(duration: &Duration) -> String {
 }
 
 pub struct Engine {
-    imgui_context: Option<imgui::Context>,
-    imgui_platform: Option<WinitPlatform>,
+    imgui_context: imgui::Context,
+    imgui_platform: WinitPlatform,
     graph: Option<RenderGraph>,
-    renderer: Option<Renderer>,
+    renderer: Renderer,
     audio_track: Option<AudioTrack>,
-    audio_device: Option<AudioDevice>,
+    // TODO: The audio track should have a dependency on the audio device
+    #[allow(dead_code)]
+    audio_device: AudioDevice,
     input_state: InputState,
     last_frame_time: Instant,
     exit_requested: bool,
@@ -98,14 +100,30 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new() -> Self {
+    fn new(window: &Window) -> Self {
+        let mut imgui_context = imgui::Context::create();
+        imgui_context.set_renderer_name(Some(imgui::ImString::from(String::from("Spark"))));
+        imgui_context
+            .io_mut()
+            .backend_flags
+            .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
+
+        let mut imgui_platform = WinitPlatform::init(&mut imgui_context);
+        imgui_platform.attach_window(imgui_context.io_mut(), &window, HiDpiMode::Default);
+
+        let audio_device = AudioDevice::new().expect("Failed to create audio device");
+
+        let enable_validation = cfg!(debug_assertions);
+        let renderer = Renderer::new(&window, enable_validation, &mut imgui_context)
+            .expect("Failed to create renderer");
+
         Engine {
-            imgui_context: None,
-            imgui_platform: None,
+            imgui_context,
+            imgui_platform,
             graph: None,
-            renderer: None,
+            renderer,
             audio_track: None,
-            audio_device: None,
+            audio_device,
             input_state: InputState::default(),
             last_frame_time: Instant::now(),
             exit_requested: false,
@@ -113,38 +131,18 @@ impl Engine {
         }
     }
 
-    pub fn init(&mut self, window: &Window) {
-        let mut context = imgui::Context::create();
-        context.set_renderer_name(Some(imgui::ImString::from(String::from("Spark"))));
-        context
-            .io_mut()
-            .backend_flags
-            .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
-
-        let mut platform = WinitPlatform::init(&mut context);
-        platform.attach_window(context.io_mut(), &window, HiDpiMode::Default);
-
-        let audio_device = AudioDevice::new().expect("Failed to create audio device");
+    pub fn init(&mut self) {
         let audio_track =
             AudioTrack::from_path("res/audio/test.mp3").expect("Failed to create audio track");
 
-        let enable_validation = cfg!(debug_assertions);
-        let renderer = Renderer::new(&window, enable_validation, &mut context)
-            .expect("Failed to create renderer");
-
-        self.imgui_context = Some(context);
-        self.imgui_platform = Some(platform);
         self.audio_track = Some(audio_track);
-        self.audio_device = Some(audio_device);
-        self.renderer = Some(renderer);
 
         self.init_render_graph();
     }
 
     fn init_render_graph(&mut self) {
         // Test graph
-        let (swapchain_width, swapchain_height) =
-            self.renderer.as_ref().unwrap().get_swapchain_resolution();
+        let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
 
         let dispatch_dims = RenderGraphDispatchDimensions {
             num_groups_x: ((swapchain_width + 7) & !7) / 8,
@@ -231,13 +229,13 @@ impl Engine {
             output_image_name,
         };
         self.graph = Some(
-            RenderGraph::new(&render_graph_desc, self.renderer.as_mut().unwrap())
+            RenderGraph::new(&render_graph_desc, &mut self.renderer)
                 .expect("Failed to create render graph"),
         );
     }
 
     fn destroy(&mut self) {
-        self.renderer.as_mut().unwrap().wait_for_idle();
+        self.renderer.wait_for_idle();
         if let Err(err) = self.audio_track.as_mut().unwrap().stop() {
             println!("Failed to stop audio track: {}", err);
         }
@@ -248,11 +246,7 @@ impl Engine {
         //       When a window is minimized, it resizes to 0x0 which causes all sorts of problems
         //       inside the graphics api. This basically results in crashes on minimize. :/
         //       This will be fixed in a future change.
-        self.renderer
-            .as_mut()
-            .unwrap()
-            .recreate_swapchain(&window)
-            .unwrap();
+        self.renderer.recreate_swapchain(&window).unwrap();
 
         self.init_render_graph();
     }
@@ -267,14 +261,11 @@ impl Engine {
             Event::NewEvents(StartCause::Init) => {
                 *control_flow = ControlFlow::Poll;
 
-                self.init(&window);
+                self.init();
             }
             _ => {
-                self.imgui_platform.as_mut().unwrap().handle_event(
-                    self.imgui_context.as_mut().unwrap().io_mut(),
-                    &window,
-                    &event,
-                );
+                self.imgui_platform
+                    .handle_event(self.imgui_context.io_mut(), &window, &event);
 
                 match event {
                     Event::WindowEvent { event, .. } => match event {
@@ -310,7 +301,7 @@ impl Engine {
     }
 
     fn run_frame(&mut self, window: &mut Window) {
-        self.renderer.as_mut().unwrap().begin_frame();
+        self.renderer.begin_frame();
 
         let now = Instant::now();
         let delta_time = now - self.last_frame_time;
@@ -359,22 +350,16 @@ impl Engine {
             }
         }
 
-        self.imgui_context
-            .as_mut()
-            .unwrap()
-            .io_mut()
-            .update_delta_time(delta_time);
+        self.imgui_context.io_mut().update_delta_time(delta_time);
         self.last_frame_time = now;
 
         self.timer.push_sample(delta_time);
 
         self.imgui_platform
-            .as_mut()
-            .unwrap()
-            .prepare_frame(self.imgui_context.as_mut().unwrap().io_mut(), &window)
+            .prepare_frame(self.imgui_context.io_mut(), &window)
             .expect("Failed to prepare frame");
 
-        let ui = self.imgui_context.as_mut().unwrap().frame();
+        let ui = self.imgui_context.frame();
 
         let avg_frame_time_us = self.timer.calculate_average().as_micros() as f64;
 
@@ -412,13 +397,10 @@ impl Engine {
             main_menu_bar.end(&ui);
         }
 
-        self.imgui_platform
-            .as_mut()
-            .unwrap()
-            .prepare_render(&ui, &window);
+        self.imgui_platform.prepare_render(&ui, &window);
         let draw_data = ui.render();
 
-        let cur_swapchain_idx = self.renderer.as_ref().unwrap().get_cur_swapchain_idx();
+        let cur_swapchain_idx = self.renderer.get_cur_swapchain_idx();
         let mut render_graph_image = false;
         if let Some(output_image_view) = self
             .graph
@@ -426,10 +408,7 @@ impl Engine {
             .unwrap()
             .get_output_image(cur_swapchain_idx)
         {
-            self.renderer
-                .as_mut()
-                .unwrap()
-                .update_graph_image(output_image_view);
+            self.renderer.update_graph_image(output_image_view);
 
             render_graph_image = true;
         }
@@ -437,27 +416,25 @@ impl Engine {
         let cur_time = self.audio_track.as_ref().unwrap().get_position().unwrap();
 
         self.renderer
-            .as_mut()
-            .unwrap()
             .execute_graph(self.graph.as_ref().unwrap(), &cur_time)
             .expect("Failed to execute render graph");
 
-        self.renderer.as_mut().unwrap().begin_render();
+        self.renderer.begin_render();
 
         if render_graph_image {
-            self.renderer.as_mut().unwrap().render_graph_image();
+            self.renderer.render_graph_image();
         }
 
-        self.renderer.as_mut().unwrap().render_ui(draw_data);
+        self.renderer.render_ui(draw_data);
 
-        self.renderer.as_mut().unwrap().end_render();
+        self.renderer.end_render();
 
-        self.renderer.as_mut().unwrap().end_frame();
+        self.renderer.end_frame();
 
         self.input_state.next_frame();
     }
 
-    pub fn run(mut self) -> ! {
+    pub fn run() -> ! {
         let window_width = 1280;
         let window_height = 720;
 
@@ -468,14 +445,10 @@ impl Engine {
             .build(&event_loop)
             .expect("Failed to create window");
 
-        event_loop.run(move |event, _, control_flow| {
-            self.handle_event(&mut window, &event, control_flow);
-        });
-    }
-}
+        let mut engine = Self::new(&window);
 
-impl Default for Engine {
-    fn default() -> Self {
-        Self::new()
+        event_loop.run(move |event, _, control_flow| {
+            engine.handle_event(&mut window, &event, control_flow);
+        });
     }
 }
