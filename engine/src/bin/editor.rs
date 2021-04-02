@@ -3,6 +3,5 @@
 use spark::engine::Engine;
 
 fn main() {
-    let engine = Engine::new();
-    engine.run();
+    Engine::run()
 }
