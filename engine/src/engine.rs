@@ -131,10 +131,10 @@ impl Engine {
     }
 
     pub fn init(&mut self) {
-        let audio_track = AudioTrack::from_path(self.audio_device.clone(), "res/audio/test.mp3")
-            .expect("Failed to create audio track");
-
-        self.audio_track = Some(audio_track);
+        self.audio_track = Some(
+            AudioTrack::from_path(self.audio_device.clone(), "res/audio/test.mp3")
+                .expect("Failed to create audio track"),
+        );
 
         self.init_render_graph();
     }
@@ -235,8 +235,10 @@ impl Engine {
 
     fn destroy(&mut self) {
         self.renderer.wait_for_idle();
-        if let Err(err) = self.audio_track.as_mut().unwrap().stop() {
-            println!("Failed to stop audio track: {}", err);
+        if let Some(track) = &mut self.audio_track {
+            if let Err(err) = track.stop() {
+                println!("Failed to stop audio track: {}", err);
+            }
         }
     }
 
@@ -306,45 +308,37 @@ impl Engine {
         let delta_time = now - self.last_frame_time;
 
         // Audio track control
-        if self.input_state.is_key_pressed(VirtualKeyCode::Space)
-            && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
-        {
-            if let Err(err) = self.audio_track.as_mut().unwrap().toggle_pause() {
-                println!("Failed to toggle audio track playback: {}", err);
-            }
-        }
-        if !self.audio_track.as_ref().unwrap().is_playing() {
-            let mut modifier = 0.05;
-            if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
-                || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
+        if let Some(track) = &mut self.audio_track {
+            if self.input_state.is_key_pressed(VirtualKeyCode::Space)
+                && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
             {
-                if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
-                    || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
-                {
-                    modifier = 25.0;
-                } else {
-                    modifier = 5.0;
+                if let Err(err) = track.toggle_pause() {
+                    println!("Failed to toggle audio track playback: {}", err);
                 }
             }
-
-            let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
-            if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
-                if let Err(err) = self
-                    .audio_track
-                    .as_mut()
-                    .unwrap()
-                    .subtract_position_offset(&offset)
+            if !track.is_playing() {
+                let mut modifier = 0.05;
+                if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
+                    || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
                 {
-                    println!("Failed to rewind audio track: {}", err);
+                    if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
+                        || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
+                    {
+                        modifier = 25.0;
+                    } else {
+                        modifier = 5.0;
+                    }
                 }
-            } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
-                if let Err(err) = self
-                    .audio_track
-                    .as_mut()
-                    .unwrap()
-                    .add_position_offset(&offset)
-                {
-                    println!("Failed to fast-forward audio track: {}", err);
+
+                let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
+                if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
+                    if let Err(err) = track.subtract_position_offset(&offset) {
+                        println!("Failed to rewind audio track: {}", err);
+                    }
+                } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
+                    if let Err(err) = track.add_position_offset(&offset) {
+                        println!("Failed to fast-forward audio track: {}", err);
+                    }
                 }
             }
         }
@@ -386,13 +380,17 @@ impl Engine {
                     .graph_size([64.0, 20.0])
                     .build();
             }
-            let audio_pos = self.audio_track.as_ref().unwrap().get_position().unwrap();
-            let audio_length = self.audio_track.as_ref().unwrap().get_length();
-            ui.text(format!(
-                "Track: {} [{}]",
-                format_duration(&audio_pos),
-                format_duration(&audio_length)
-            ));
+            if let Some(track) = &mut self.audio_track {
+                let audio_pos = track.get_position().unwrap();
+                let audio_length = track.get_length();
+                ui.text(format!(
+                    "Track: {} [{}]",
+                    format_duration(&audio_pos),
+                    format_duration(&audio_length)
+                ));
+            } else {
+                ui.text("No Track Loaded");
+            }
             main_menu_bar.end(&ui);
         }
 
@@ -412,7 +410,10 @@ impl Engine {
             render_graph_image = true;
         }
 
-        let cur_time = self.audio_track.as_ref().unwrap().get_position().unwrap();
+        let cur_time = self
+            .audio_track
+            .as_ref()
+            .map_or(Duration::default(), |track| track.get_position().unwrap());
 
         self.renderer
             .execute_graph(self.graph.as_ref().unwrap(), &cur_time)
