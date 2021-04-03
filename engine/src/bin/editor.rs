@@ -3,5 +3,5 @@
 use spark::engine::Engine;
 
 fn main() {
-    Engine::run()
+    Engine::run();
 }
