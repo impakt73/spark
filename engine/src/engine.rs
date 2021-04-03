@@ -2,6 +2,7 @@ use ash::vk;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::{
     collections::VecDeque,
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -53,6 +54,18 @@ impl DemoConfig {
         let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
 
         Ok(demo_config)
+    }
+
+    /// Creates a resource path based the file path of a demo config
+    fn make_res_path(config_path: &Option<String>, path: &str) -> String {
+        if let Some(config_path) = config_path {
+            let config_path = Path::new(config_path);
+            let res_dir = Path::parent(config_path).expect("Unexpected demo config path format");
+            return res_dir.join(path).to_str().unwrap().to_string();
+        } else {
+            // Just return the original path if there's no demo config path to reference
+            path.to_string()
+        }
     }
 }
 
@@ -241,7 +254,9 @@ impl Engine {
             self.window
                 .set_title(&build_window_title(&self.demo_config));
 
-            match AudioTrack::from_path(self.audio_device.clone(), &demo_config.track_path) {
+            let track_path =
+                DemoConfig::make_res_path(&self.demo_config_path, &demo_config.track_path);
+            match AudioTrack::from_path(self.audio_device.clone(), &track_path) {
                 Ok(audio_track) => {
                     self.audio_track = Some(audio_track);
                 }
@@ -268,12 +283,16 @@ impl Engine {
                 .graph
                 .nodes
                 .iter()
-                .map(|config_node| RenderGraphNodeDesc {
-                    name: config_node.name.clone(),
-                    pipeline: RenderGraphPipelineSource::File(config_node.pipeline.clone()),
-                    refs: config_node.refs.clone(),
-                    dims: dispatch_dims,
-                    deps: config_node.deps.clone(),
+                .map(|config_node| {
+                    let pipeline_path =
+                        DemoConfig::make_res_path(&self.demo_config_path, &config_node.pipeline);
+                    RenderGraphNodeDesc {
+                        name: config_node.name.clone(),
+                        pipeline: RenderGraphPipelineSource::File(pipeline_path),
+                        refs: config_node.refs.clone(),
+                        dims: dispatch_dims,
+                        deps: config_node.deps.clone(),
+                    }
                 })
                 .collect::<Vec<RenderGraphNodeDesc>>();
 
