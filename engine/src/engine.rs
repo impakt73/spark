@@ -16,13 +16,51 @@ use crate::renderer::Renderer;
 use crate::{
     input_state::InputState,
     render_graph::{
-        RenderGraph, RenderGraphDesc, RenderGraphDispatchDimensions, RenderGraphImageParams,
-        RenderGraphNodeDesc, RenderGraphPipelineSource, RenderGraphResourceDesc,
-        RenderGraphResourceParams,
+        RenderGraph, RenderGraphBufferParams, RenderGraphDesc, RenderGraphDispatchDimensions,
+        RenderGraphImageParams, RenderGraphNodeDesc, RenderGraphPipelineSource,
+        RenderGraphResourceDesc, RenderGraphResourceParams,
     },
 };
 
-use align_data::include_aligned;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct DemoConfig {
+    group_name: String,
+    demo_name: String,
+    track_path: String,
+    graph: GraphConfig,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphConfig {
+    resources: Vec<GraphConfigResource>,
+    output_resource: Option<String>,
+    nodes: Vec<GraphConfigNode>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphConfigResource {
+    name: String,
+    params: GraphConfigResourceParams,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum GraphConfigResourceParams {
+    Image,
+    Buffer,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphConfigNode {
+    name: String,
+    pipeline: String,
+    refs: Vec<String>,
+    deps: Vec<String>,
+}
+
+/// Default path for the demo config file
+const DEFAULT_DEMO_CONFIG_PATH: &str = "res/data/demo.json";
 
 /// Helper for measuring frame timer
 ///
@@ -130,102 +168,103 @@ impl Engine {
         }
     }
 
-    pub fn reload_scene(&mut self) {
-        // Idle the renderer before we modify any rendering resources
-        self.renderer.wait_for_idle();
+    /// Attempts to load a demo config structure from the provided path
+    fn load_config(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
+        let demo_config_str = std::fs::read_to_string(path)?;
+        let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
 
-        self.audio_track = Some(
-            AudioTrack::from_path(self.audio_device.clone(), "res/audio/test.mp3")
-                .expect("Failed to create audio track"),
-        );
+        Ok(demo_config)
+    }
 
-        // Test graph
-        let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
+    /// Reloads the current demo config from disk
+    pub fn reload_demo(&mut self) {
+        // Attempt to load a new demo config
+        match Self::load_config(DEFAULT_DEMO_CONFIG_PATH) {
+            Ok(demo_config) => {
+                match AudioTrack::from_path(self.audio_device.clone(), &demo_config.track_path) {
+                    Ok(audio_track) => {
+                        self.audio_track = Some(audio_track);
+                    }
+                    Err(err) => {
+                        println!(
+                            "Failed to load audio track: {} ({})",
+                            demo_config.track_path, err
+                        );
+                    }
+                }
 
-        let dispatch_dims = RenderGraphDispatchDimensions {
-            num_groups_x: ((swapchain_width + 7) & !7) / 8,
-            num_groups_y: ((swapchain_height + 3) & !3) / 4,
-            num_groups_z: 1,
-        };
+                // Idle the renderer before we modify any rendering resources
+                self.renderer.wait_for_idle();
 
-        let nodes = vec![
-            RenderGraphNodeDesc {
-                name: String::from("Red"),
-                pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                    include_aligned!(u32, "../spv/Red.comp.spv")
-                        .align_to::<u32>()
-                        .1
-                }),
-                refs: vec![String::from("RedImage")],
-                dims: dispatch_dims,
-                deps: Vec::new(),
-            },
-            RenderGraphNodeDesc {
-                name: String::from("Green"),
-                pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                    include_aligned!(u32, "../spv/Green.comp.spv")
-                        .align_to::<u32>()
-                        .1
-                }),
-                refs: vec![String::from("GreenImage")],
-                dims: dispatch_dims,
-                deps: Vec::new(),
-            },
-            RenderGraphNodeDesc {
-                name: String::from("Yellow"),
-                pipeline: RenderGraphPipelineSource::Buffer(unsafe {
-                    include_aligned!(u32, "../spv/Yellow.comp.spv")
-                        .align_to::<u32>()
-                        .1
-                }),
-                refs: vec![
-                    String::from("RedImage"),
-                    String::from("GreenImage"),
-                    String::from("YellowImage"),
-                ],
-                dims: dispatch_dims,
-                deps: vec![String::from("Red"), String::from("Green")],
-            },
-        ];
+                let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
 
-        let resources = vec![
-            RenderGraphResourceDesc {
-                name: String::from("RedImage"),
-                params: RenderGraphResourceParams::Image(RenderGraphImageParams {
-                    width: swapchain_width,
-                    height: swapchain_height,
-                    format: vk::Format::R8G8B8A8_UNORM,
-                }),
-            },
-            RenderGraphResourceDesc {
-                name: String::from("GreenImage"),
-                params: RenderGraphResourceParams::Image(RenderGraphImageParams {
-                    width: swapchain_width,
-                    height: swapchain_height,
-                    format: vk::Format::R8G8B8A8_UNORM,
-                }),
-            },
-            RenderGraphResourceDesc {
-                name: String::from("YellowImage"),
-                params: RenderGraphResourceParams::Image(RenderGraphImageParams {
-                    width: swapchain_width,
-                    height: swapchain_height,
-                    format: vk::Format::R8G8B8A8_UNORM,
-                }),
-            },
-        ];
+                let dispatch_dims = RenderGraphDispatchDimensions {
+                    num_groups_x: ((swapchain_width + 7) & !7) / 8,
+                    num_groups_y: ((swapchain_height + 3) & !3) / 4,
+                    num_groups_z: 1,
+                };
 
-        let output_image_name = Some(String::from("YellowImage"));
+                let nodes = demo_config
+                    .graph
+                    .nodes
+                    .iter()
+                    .map(|config_node| RenderGraphNodeDesc {
+                        name: config_node.name.clone(),
+                        pipeline: RenderGraphPipelineSource::File(config_node.pipeline.clone()),
+                        refs: config_node.refs.clone(),
+                        dims: dispatch_dims,
+                        deps: config_node.deps.clone(),
+                    })
+                    .collect::<Vec<RenderGraphNodeDesc>>();
 
-        let render_graph_desc = RenderGraphDesc {
-            resources,
-            nodes,
-            output_image_name,
-        };
-        self.graph = Some(
-            RenderGraph::new(&render_graph_desc, &mut self.renderer)
-                .expect("Failed to create render graph"),
-        );
+                let resources = demo_config
+                    .graph
+                    .resources
+                    .iter()
+                    .map(|config_resource| {
+                        let params = match config_resource.params {
+                            GraphConfigResourceParams::Image => {
+                                RenderGraphResourceParams::Image(RenderGraphImageParams {
+                                    width: swapchain_width,
+                                    height: swapchain_height,
+                                    format: vk::Format::R8G8B8A8_UNORM,
+                                })
+                            }
+                            GraphConfigResourceParams::Buffer => {
+                                // TODO: Support buffer resources
+                                RenderGraphResourceParams::Buffer(RenderGraphBufferParams {
+                                    size: 0,
+                                })
+                            }
+                        };
+                        RenderGraphResourceDesc {
+                            name: config_resource.name.clone(),
+                            params,
+                        }
+                    })
+                    .collect::<Vec<RenderGraphResourceDesc>>();
+
+                let output_image_name = demo_config.graph.output_resource;
+
+                let render_graph_desc = RenderGraphDesc {
+                    resources,
+                    nodes,
+                    output_image_name,
+                };
+
+                match RenderGraph::new(&render_graph_desc, &mut self.renderer) {
+                    Ok(graph) => {
+                        self.graph = Some(graph);
+                    }
+                    Err(err) => {
+                        println!("Failed to load render graph: {}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                println!("Failed to load demo config: {}", err);
+            }
+        }
     }
 
     fn destroy(&mut self) {
@@ -244,7 +283,7 @@ impl Engine {
         //       This will be fixed in a future change.
         self.renderer.recreate_swapchain(&window).unwrap();
 
-        self.reload_scene();
+        self.reload_demo();
     }
 
     fn handle_event(
@@ -257,7 +296,7 @@ impl Engine {
             Event::NewEvents(StartCause::Init) => {
                 *control_flow = ControlFlow::Poll;
 
-                self.reload_scene();
+                self.reload_demo();
             }
             _ => {
                 self.imgui_platform
@@ -352,7 +391,7 @@ impl Engine {
         let avg_frame_time_us = self.timer.calculate_average().as_micros() as f64;
 
         // Render UI
-        let mut reload_scene = false;
+        let mut reload_demo = false;
         if let Some(main_menu_bar) = ui.begin_main_menu_bar() {
             if let Some(file_menu) = ui.begin_menu(imgui::im_str!("File"), true) {
                 if imgui::MenuItem::new(imgui::im_str!("Exit")).build(&ui) {
@@ -362,12 +401,12 @@ impl Engine {
                 file_menu.end(&ui);
             }
 
-            if let Some(scene_menu) = ui.begin_menu(imgui::im_str!("Scene"), true) {
+            if let Some(demo_menu) = ui.begin_menu(imgui::im_str!("Demo"), true) {
                 if imgui::MenuItem::new(imgui::im_str!("Reload")).build(&ui) {
-                    reload_scene = true;
+                    reload_demo = true;
                 }
 
-                scene_menu.end(&ui);
+                demo_menu.end(&ui);
             }
 
             ui.text(format!("CPU: {:.2}ms", avg_frame_time_us / 1000.0));
@@ -434,9 +473,9 @@ impl Engine {
 
         self.input_state.next_frame();
 
-        // If a scene reload was requested via the UI, perform the operation once the current frame has been submitted
-        if reload_scene {
-            self.reload_scene();
+        // If a demo reload was requested via the UI, perform the operation once the current frame has been submitted
+        if reload_demo {
+            self.reload_demo();
         }
     }
 
