@@ -482,8 +482,11 @@ impl Engine {
 
             if let Some(demo_menu) = ui.begin_menu(imgui::im_str!("Demo"), true) {
                 if imgui::MenuItem::new(imgui::im_str!("Load")).build(&ui) {
-                    if let Ok(nfd::Response::Okay(path)) = nfd::open_file_dialog(Some("json"), None)
-                    {
+                    if let Some(path) = tinyfiledialogs::open_file_dialog(
+                        "Load Demo Config",
+                        "",
+                        Some((&["*.json"], "Demo Config Files (*.json)")),
+                    ) {
                         self.demo_config_path = Some(path);
                         reload_demo = true;
                     }
