@@ -3,6 +3,7 @@ name = "spark"
 version = "0.1.0"
 authors = ["Gregory Mitrano <gregory.mitrano@gmail.com>"]
 edition = "2018"
+default-run = "editor"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

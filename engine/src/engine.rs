@@ -8,7 +8,7 @@ use std::{
 use winit::{
     event::{Event, StartCause, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
+    window::{Fullscreen, Window, WindowBuilder},
 };
 
 use crate::audio_device::{AudioDevice, AudioTrack};
@@ -24,43 +24,64 @@ use crate::{
 
 use serde::{Deserialize, Serialize};
 
+pub enum WindowConfig {
+    Windowed { width: u32, height: u32 },
+    Fullscreen,
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        WindowConfig::Windowed {
+            width: 1280,
+            height: 720,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
-struct DemoConfig {
+pub struct DemoConfig {
     group_name: String,
     demo_name: String,
     track_path: String,
     graph: GraphConfig,
 }
 
+impl DemoConfig {
+    /// Attempts to load a demo config structure from the provided path
+    pub fn from_path(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
+        let demo_config_str = std::fs::read_to_string(path)?;
+        let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
+
+        Ok(demo_config)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
-struct GraphConfig {
+pub struct GraphConfig {
     resources: Vec<GraphConfigResource>,
     output_resource: Option<String>,
     nodes: Vec<GraphConfigNode>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct GraphConfigResource {
+pub struct GraphConfigResource {
     name: String,
     params: GraphConfigResourceParams,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-enum GraphConfigResourceParams {
+pub enum GraphConfigResourceParams {
     Image,
     Buffer,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct GraphConfigNode {
+pub struct GraphConfigNode {
     name: String,
     pipeline: String,
     refs: Vec<String>,
     deps: Vec<String>,
 }
-
-/// Default path for the demo config file
-const DEFAULT_DEMO_CONFIG_PATH: &str = "res/data/demo.json";
 
 /// Helper for measuring frame timer
 ///
@@ -123,6 +144,23 @@ fn format_duration(duration: &Duration) -> String {
     format!("{:.0}:{:0>5.2}", mins, secs)
 }
 
+/// Attempts to load a demo config structure from the provided path
+fn load_config(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
+    let demo_config_str = std::fs::read_to_string(path)?;
+    let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
+
+    Ok(demo_config)
+}
+
+/// Builds a window title string based on the input demo config
+fn build_window_title(demo_config: &Option<DemoConfig>) -> String {
+    if let Some(config) = demo_config {
+        format!("{} - {}", config.group_name, config.demo_name)
+    } else {
+        String::from("Spark Demo Engine")
+    }
+}
+
 pub struct Engine {
     imgui_context: imgui::Context,
     imgui_platform: WinitPlatform,
@@ -131,13 +169,20 @@ pub struct Engine {
     audio_track: Option<AudioTrack>,
     audio_device: Arc<AudioDevice>,
     input_state: InputState,
+    window: Window,
     last_frame_time: Instant,
     exit_requested: bool,
     timer: FrameTimer,
+    demo_config_path: Option<String>,
+    demo_config: Option<DemoConfig>,
 }
 
 impl Engine {
-    fn new(window: &Window) -> Self {
+    fn new(
+        window: Window,
+        demo_config_path: Option<String>,
+        demo_config: Option<DemoConfig>,
+    ) -> Self {
         let mut imgui_context = imgui::Context::create();
         imgui_context.set_renderer_name(Some(imgui::ImString::from(String::from("Spark"))));
         imgui_context
@@ -154,6 +199,8 @@ impl Engine {
         let renderer = Renderer::new(&window, enable_validation, &mut imgui_context)
             .expect("Failed to create renderer");
 
+        window.set_visible(true);
+
         Engine {
             imgui_context,
             imgui_platform,
@@ -162,107 +209,114 @@ impl Engine {
             audio_track: None,
             audio_device,
             input_state: InputState::default(),
+            window,
             last_frame_time: Instant::now(),
             exit_requested: false,
             timer: FrameTimer::new(64),
+            demo_config_path,
+            demo_config,
         }
     }
 
-    /// Attempts to load a demo config structure from the provided path
-    fn load_config(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
-        let demo_config_str = std::fs::read_to_string(path)?;
-        let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
-
-        Ok(demo_config)
-    }
-
     /// Reloads the current demo config from disk
-    pub fn reload_demo(&mut self) {
-        // Attempt to load a new demo config
-        match Self::load_config(DEFAULT_DEMO_CONFIG_PATH) {
-            Ok(demo_config) => {
-                match AudioTrack::from_path(self.audio_device.clone(), &demo_config.track_path) {
-                    Ok(audio_track) => {
-                        self.audio_track = Some(audio_track);
-                    }
-                    Err(err) => {
-                        println!(
-                            "Failed to load audio track: {} ({})",
-                            demo_config.track_path, err
-                        );
-                    }
+    fn reload_demo_config_file(&mut self) {
+        if let Some(path) = &self.demo_config_path {
+            // Attempt to load a new demo config
+            match load_config(&path) {
+                Ok(demo_config) => {
+                    self.demo_config = Some(demo_config);
+
+                    // Reload the demo config if we've replaced it
+                    self.reload_demo_config();
                 }
-
-                // Idle the renderer before we modify any rendering resources
-                self.renderer.wait_for_idle();
-
-                let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
-
-                let dispatch_dims = RenderGraphDispatchDimensions {
-                    num_groups_x: ((swapchain_width + 7) & !7) / 8,
-                    num_groups_y: ((swapchain_height + 3) & !3) / 4,
-                    num_groups_z: 1,
-                };
-
-                let nodes = demo_config
-                    .graph
-                    .nodes
-                    .iter()
-                    .map(|config_node| RenderGraphNodeDesc {
-                        name: config_node.name.clone(),
-                        pipeline: RenderGraphPipelineSource::File(config_node.pipeline.clone()),
-                        refs: config_node.refs.clone(),
-                        dims: dispatch_dims,
-                        deps: config_node.deps.clone(),
-                    })
-                    .collect::<Vec<RenderGraphNodeDesc>>();
-
-                let resources = demo_config
-                    .graph
-                    .resources
-                    .iter()
-                    .map(|config_resource| {
-                        let params = match config_resource.params {
-                            GraphConfigResourceParams::Image => {
-                                RenderGraphResourceParams::Image(RenderGraphImageParams {
-                                    width: swapchain_width,
-                                    height: swapchain_height,
-                                    format: vk::Format::R8G8B8A8_UNORM,
-                                })
-                            }
-                            GraphConfigResourceParams::Buffer => {
-                                // TODO: Support buffer resources
-                                RenderGraphResourceParams::Buffer(RenderGraphBufferParams {
-                                    size: 0,
-                                })
-                            }
-                        };
-                        RenderGraphResourceDesc {
-                            name: config_resource.name.clone(),
-                            params,
-                        }
-                    })
-                    .collect::<Vec<RenderGraphResourceDesc>>();
-
-                let output_image_name = demo_config.graph.output_resource;
-
-                let render_graph_desc = RenderGraphDesc {
-                    resources,
-                    nodes,
-                    output_image_name,
-                };
-
-                match RenderGraph::new(&render_graph_desc, &mut self.renderer) {
-                    Ok(graph) => {
-                        self.graph = Some(graph);
-                    }
-                    Err(err) => {
-                        println!("Failed to load render graph: {}", err);
-                    }
+                Err(err) => {
+                    println!("Failed to load demo config: {} ({})", path, err);
                 }
             }
-            Err(err) => {
-                println!("Failed to load demo config: {}", err);
+        }
+    }
+
+    fn reload_demo_config(&mut self) {
+        if let Some(demo_config) = &self.demo_config {
+            self.window
+                .set_title(&build_window_title(&self.demo_config));
+
+            match AudioTrack::from_path(self.audio_device.clone(), &demo_config.track_path) {
+                Ok(audio_track) => {
+                    self.audio_track = Some(audio_track);
+                }
+                Err(err) => {
+                    println!(
+                        "Failed to load audio track: {} ({})",
+                        demo_config.track_path, err
+                    );
+                }
+            }
+
+            // Idle the renderer before we modify any rendering resources
+            self.renderer.wait_for_idle();
+
+            let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
+
+            let dispatch_dims = RenderGraphDispatchDimensions {
+                num_groups_x: ((swapchain_width + 7) & !7) / 8,
+                num_groups_y: ((swapchain_height + 3) & !3) / 4,
+                num_groups_z: 1,
+            };
+
+            let nodes = demo_config
+                .graph
+                .nodes
+                .iter()
+                .map(|config_node| RenderGraphNodeDesc {
+                    name: config_node.name.clone(),
+                    pipeline: RenderGraphPipelineSource::File(config_node.pipeline.clone()),
+                    refs: config_node.refs.clone(),
+                    dims: dispatch_dims,
+                    deps: config_node.deps.clone(),
+                })
+                .collect::<Vec<RenderGraphNodeDesc>>();
+
+            let resources = demo_config
+                .graph
+                .resources
+                .iter()
+                .map(|config_resource| {
+                    let params = match config_resource.params {
+                        GraphConfigResourceParams::Image => {
+                            RenderGraphResourceParams::Image(RenderGraphImageParams {
+                                width: swapchain_width,
+                                height: swapchain_height,
+                                format: vk::Format::R8G8B8A8_UNORM,
+                            })
+                        }
+                        GraphConfigResourceParams::Buffer => {
+                            // TODO: Support buffer resources
+                            RenderGraphResourceParams::Buffer(RenderGraphBufferParams { size: 0 })
+                        }
+                    };
+                    RenderGraphResourceDesc {
+                        name: config_resource.name.clone(),
+                        params,
+                    }
+                })
+                .collect::<Vec<RenderGraphResourceDesc>>();
+
+            let output_image_name = demo_config.graph.output_resource.clone();
+
+            let render_graph_desc = RenderGraphDesc {
+                resources,
+                nodes,
+                output_image_name,
+            };
+
+            match RenderGraph::new(&render_graph_desc, &mut self.renderer) {
+                Ok(graph) => {
+                    self.graph = Some(graph);
+                }
+                Err(err) => {
+                    println!("Failed to load render graph: {}", err);
+                }
             }
         }
     }
@@ -276,37 +330,35 @@ impl Engine {
         }
     }
 
-    fn resize(&mut self, window: &Window) {
+    fn resize(&mut self) {
         // TODO: This code needs to be updated to properly handle minimized windows
         //       When a window is minimized, it resizes to 0x0 which causes all sorts of problems
         //       inside the graphics api. This basically results in crashes on minimize. :/
         //       This will be fixed in a future change.
-        self.renderer.recreate_swapchain(&window).unwrap();
+        self.renderer.recreate_swapchain(&self.window).unwrap();
 
-        self.reload_demo();
+        // We need to reload the current demo config whenever the window resizes because it contains
+        // resources that are resolution/swapchain-size dependent.
+        self.reload_demo_config();
     }
 
-    fn handle_event(
-        &mut self,
-        window: &mut Window,
-        event: &Event<()>,
-        control_flow: &mut ControlFlow,
-    ) {
+    fn handle_event(&mut self, event: &Event<()>, control_flow: &mut ControlFlow) {
         match event {
             Event::NewEvents(StartCause::Init) => {
                 *control_flow = ControlFlow::Poll;
 
-                self.reload_demo();
+                // The demo config needs to be initialized once the window is created
+                self.reload_demo_config();
             }
             _ => {
                 self.imgui_platform
-                    .handle_event(self.imgui_context.io_mut(), &window, &event);
+                    .handle_event(self.imgui_context.io_mut(), &self.window, &event);
 
                 match event {
                     Event::WindowEvent { event, .. } => match event {
                         WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                         WindowEvent::Resized(_new_size) => {
-                            self.resize(window);
+                            self.resize();
                         }
                         WindowEvent::KeyboardInput { input, .. } => {
                             if let Some(keycode) = input.virtual_keycode {
@@ -316,7 +368,7 @@ impl Engine {
                         _ => {}
                     },
                     Event::MainEventsCleared => {
-                        self.run_frame(window);
+                        self.run_frame();
 
                         if self.exit_requested {
                             *control_flow = ControlFlow::Exit;
@@ -335,7 +387,7 @@ impl Engine {
         }
     }
 
-    fn run_frame(&mut self, window: &mut Window) {
+    fn run_frame(&mut self) {
         self.renderer.begin_frame();
 
         let now = Instant::now();
@@ -383,7 +435,7 @@ impl Engine {
         self.timer.push_sample(delta_time);
 
         self.imgui_platform
-            .prepare_frame(self.imgui_context.io_mut(), &window)
+            .prepare_frame(self.imgui_context.io_mut(), &self.window)
             .expect("Failed to prepare frame");
 
         let ui = self.imgui_context.frame();
@@ -445,7 +497,7 @@ impl Engine {
             main_menu_bar.end(&ui);
         }
 
-        self.imgui_platform.prepare_render(&ui, &window);
+        self.imgui_platform.prepare_render(&ui, &self.window);
         let draw_data = ui.render();
 
         let cur_swapchain_idx = self.renderer.get_cur_swapchain_idx();
@@ -483,25 +535,37 @@ impl Engine {
 
         // If a demo reload was requested via the UI, perform the operation once the current frame has been submitted
         if reload_demo {
-            self.reload_demo();
+            self.reload_demo_config_file();
         }
     }
 
     pub fn run() -> ! {
-        let window_width = 1280;
-        let window_height = 720;
+        Self::run_with_config(None, None, None);
+    }
+
+    pub fn run_with_config(
+        window_config: Option<WindowConfig>,
+        demo_config_path: Option<String>,
+        demo_config: Option<DemoConfig>,
+    ) -> ! {
+        let mut builder = WindowBuilder::new();
+        builder = builder.with_visible(false);
+        builder = builder.with_title(&build_window_title(&demo_config));
+
+        let window_config = window_config.unwrap_or_default();
+        if let WindowConfig::Windowed { width, height } = window_config {
+            builder = builder.with_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        } else {
+            builder = builder.with_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
 
         let event_loop = EventLoop::new();
-        let mut window = WindowBuilder::new()
-            .with_title("Spark Engine Editor")
-            .with_inner_size(winit::dpi::PhysicalSize::new(window_width, window_height))
-            .build(&event_loop)
-            .expect("Failed to create window");
+        let window = builder.build(&event_loop).expect("Failed to create window");
 
-        let mut engine = Self::new(&window);
+        let mut engine = Self::new(window, demo_config_path, demo_config);
 
         event_loop.run(move |event, _, control_flow| {
-            engine.handle_event(&mut window, &event, control_flow);
+            engine.handle_event(&event, control_flow);
         });
     }
 }
