@@ -29,8 +29,8 @@ pub enum RenderGraphResourceParams {
 }
 
 pub enum RenderGraphPipelineSource<'a> {
-    #[allow(dead_code)]
     File(String),
+    #[allow(dead_code)]
     Buffer(&'a [u32]),
 }
 
