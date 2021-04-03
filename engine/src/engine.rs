@@ -390,8 +390,16 @@ impl Engine {
 
         let avg_frame_time_us = self.timer.calculate_average().as_micros() as f64;
 
-        // Render UI
         let mut reload_demo = false;
+
+        // CTRL+R can be used as a hotkey for a demo reload operation
+        if self.input_state.is_key_pressed(VirtualKeyCode::LControl)
+            && self.input_state.is_key_pressed(VirtualKeyCode::R)
+        {
+            reload_demo = true;
+        }
+
+        // Render UI
         if let Some(main_menu_bar) = ui.begin_main_menu_bar() {
             if let Some(file_menu) = ui.begin_menu(imgui::im_str!("File"), true) {
                 if imgui::MenuItem::new(imgui::im_str!("Exit")).build(&ui) {
