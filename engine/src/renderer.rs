@@ -7,6 +7,7 @@ use imgui::{DrawCmd, DrawCmdParams};
 use std::{
     fs::File,
     io::Read,
+    path::Path,
     sync::{Arc, Weak},
     time::Duration,
 };
@@ -29,6 +30,11 @@ use ultraviolet::vec::Vec2;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[cfg(feature = "tools")]
+use crate::tools::ShaderCompiler;
+
+use quick_error::quick_error;
+
 /// Selects a physical device from the provided list
 fn select_physical_device(physical_devices: &[vk::PhysicalDevice]) -> vk::PhysicalDevice {
     // TODO: Support proper physical device selection
@@ -47,6 +53,27 @@ const IMGUI_FONT_TEXTURE_SLOT_INDEX: u64 = 0;
 
 /// Texture slot index associated with the render graph output
 const RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX: u64 = 1;
+
+quick_error! {
+    #[derive(Debug)]
+    enum RendererError {
+        ShaderCompilationNotAvailable
+    }
+}
+
+#[cfg(feature = "tools")]
+fn compile_shader(path: &Path) -> Result<Vec<u32>> {
+    let dir = path
+        .parent()
+        .map(|dir_path| dir_path.to_str().unwrap().to_string());
+    let mut compiler = ShaderCompiler::new(dir)?;
+    compiler.compile_shader(path.to_str().unwrap())
+}
+
+#[cfg(not(feature = "tools"))]
+fn compile_shader(_path: &Path) -> Result<Vec<u32>> {
+    Err(RendererError::ShaderCompilationNotAvailable.into())
+}
 
 struct FrameState {
     #[allow(dead_code)]
@@ -1219,27 +1246,34 @@ impl Renderer {
     }
 
     pub fn create_compute_pipeline_from_file(&mut self, spv_path: &str) -> Result<VkPipeline> {
-        let mut spv = Vec::new();
+        let path = Path::new(spv_path);
 
-        let mut file = File::open(spv_path)?;
-        loop {
-            let mut dword: [u8; 4] = [0; 4];
+        let spv = if let Some("spv") = path.extension().map(|x| x.to_str().unwrap()) {
+            let mut buf = Vec::new();
+            let mut file = File::open(spv_path)?;
+            loop {
+                let mut dword: [u8; 4] = [0; 4];
 
-            match file.read(&mut dword)? {
-                4 => {
-                    spv.push(u32::from_le_bytes(dword));
-                }
-                0 => {
-                    break;
-                }
-                _ => {
-                    return Err(Box::new(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "Not enough bytes for SPIR-V data",
-                    )));
+                match file.read(&mut dword)? {
+                    4 => {
+                        buf.push(u32::from_le_bytes(dword));
+                    }
+                    0 => {
+                        break;
+                    }
+                    _ => {
+                        return Err(Box::new(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "Not enough bytes for SPIR-V data",
+                        )));
+                    }
                 }
             }
-        }
+
+            buf
+        } else {
+            compile_shader(path)?
+        };
 
         self.create_compute_pipeline_from_buffer(&spv)
     }

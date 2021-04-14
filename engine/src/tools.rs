@@ -95,12 +95,11 @@ impl<'a> ShaderCompiler<'a> {
         })
     }
 
-    /// Compiles a single shader at the provided input path and stores the result at the output path
+    /// Compiles a single shader at the provided input path and returns the result in a Vec
     pub fn compile_shader(
         &mut self,
         input_path: &str,
-        output_path: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
         let source = fs::read_to_string(&input_path)?;
         let compile_result = self.compiler.compile_into_spirv(
             &source,
@@ -110,8 +109,22 @@ impl<'a> ShaderCompiler<'a> {
             Some(&self.compile_options),
         )?;
 
-        fs::write(output_path, compile_result.as_binary_u8())?;
-        Ok(())
+        Ok(Vec::from(compile_result.as_binary()))
+    }
+
+    /// Compiles a single shader at the provided input path and stores the result at the output path
+    pub fn compile_shader_to_path(
+        &mut self,
+        input_path: &str,
+        output_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let spv = self.compile_shader(input_path)?;
+        if let (&[], data, &[]) = unsafe { spv.align_to::<u8>() } {
+            fs::write(output_path, data)?;
+            Ok(())
+        } else {
+            panic!("Unable to cast a [u32] to a [u8]!")
+        }
     }
 
     /// Compiles all shaders in the provided input directory and writes the compiled results into the output directory
@@ -128,7 +141,10 @@ impl<'a> ShaderCompiler<'a> {
                     if is_shader_ext(ext.to_str().unwrap()) {
                         let filename = path.file_name().unwrap().to_str().unwrap().to_string();
                         let out_path = Path::new(output_dir).join(filename).with_extension("spv");
-                        self.compile_shader(path.to_str().unwrap(), out_path.to_str().unwrap())?;
+                        self.compile_shader_to_path(
+                            path.to_str().unwrap(),
+                            out_path.to_str().unwrap(),
+                        )?;
                     }
                 }
             }
