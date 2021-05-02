@@ -1,4 +1,5 @@
 use ash::vk;
+use imgui::{im_str, Slider};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::{
     collections::VecDeque,
@@ -515,11 +516,26 @@ impl Engine {
             if let Some(track) = &mut self.audio_track {
                 let audio_pos = track.get_position().unwrap();
                 let audio_length = track.get_length();
+
                 ui.text(format!(
                     "Track: {} [{}]",
                     format_duration(&audio_pos),
                     format_duration(&audio_length)
                 ));
+
+                let mut audio_pos_in_seconds = audio_pos.as_secs_f32();
+                let audio_length_in_seconds = audio_length.as_secs_f32();
+
+                if Slider::new(im_str!(""))
+                    .display_format(im_str!("%.2f"))
+                    .range(0.0..=audio_length_in_seconds)
+                    .flags(imgui::SliderFlags::ALWAYS_CLAMP)
+                    .build(&ui, &mut audio_pos_in_seconds)
+                {
+                    track
+                        .set_position(&Duration::from_secs_f32(audio_pos_in_seconds))
+                        .unwrap();
+                }
             } else {
                 ui.text("No Track Loaded");
             }

@@ -195,6 +195,10 @@ impl AudioTrack {
     }
 
     pub fn set_position(&mut self, pos: &Duration) -> AudioResult<()> {
+        // Clamp to a tiny bit before the end of the track
+        let last_pos = self.duration - Duration::from_millis(1);
+        let pos = std::cmp::min(*pos, last_pos);
+
         let pos_byte = unsafe {
             sys_call_uint!(sys::BASS_ChannelSeconds2Bytes(
                 self.stream,
@@ -214,10 +218,6 @@ impl AudioTrack {
     pub fn add_position_offset(&mut self, pos: &Duration) -> AudioResult<()> {
         let cur_pos = self.get_position()?;
         let pos = cur_pos + *pos;
-
-        // Clamp to a tiny bit before the end of the track
-        let last_pos = self.duration - Duration::from_millis(1);
-        let pos = std::cmp::min(pos, last_pos);
 
         self.set_position(&pos)
     }
