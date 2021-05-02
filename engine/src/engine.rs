@@ -246,7 +246,16 @@ impl Engine {
             let track_path =
                 DemoConfig::make_res_path(&self.demo_config_path, &demo_config.track_path);
             match AudioTrack::from_path(self.audio_device.clone(), &track_path) {
-                Ok(audio_track) => {
+                Ok(mut audio_track) => {
+                    // Attempt to copy the old track's state into the new track if possible
+                    if let Some(old_track) = &self.audio_track {
+                        audio_track
+                            .set_position(&old_track.get_position().unwrap_or_default())
+                            .ok();
+                        if old_track.is_playing() {
+                            audio_track.play().ok();
+                        }
+                    }
                     self.audio_track = Some(audio_track);
                 }
                 Err(err) => {
