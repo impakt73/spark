@@ -41,7 +41,7 @@ impl Default for WindowConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DemoConfig {
+struct DemoConfig {
     group_name: String,
     demo_name: String,
     track_path: String,
@@ -50,7 +50,7 @@ pub struct DemoConfig {
 
 impl DemoConfig {
     /// Attempts to load a demo config structure from the provided path
-    pub fn from_path(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
+    fn from_path(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
         let demo_config_str = std::fs::read_to_string(path)?;
         let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
 
@@ -158,14 +158,6 @@ fn format_duration(duration: &Duration) -> String {
     format!("{:.0}:{:0>5.2}", mins, secs)
 }
 
-/// Attempts to load a demo config structure from the provided path
-fn load_config(path: &str) -> Result<DemoConfig, Box<dyn std::error::Error>> {
-    let demo_config_str = std::fs::read_to_string(path)?;
-    let demo_config: DemoConfig = serde_json::from_str(&demo_config_str)?;
-
-    Ok(demo_config)
-}
-
 /// Builds a window title string based on the input demo config
 fn build_window_title(demo_config: &Option<DemoConfig>) -> String {
     if let Some(config) = demo_config {
@@ -192,11 +184,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    fn new(
-        window: Window,
-        demo_config_path: Option<String>,
-        demo_config: Option<DemoConfig>,
-    ) -> Self {
+    fn new(window: Window, demo_config_path: Option<String>) -> Self {
         let mut imgui_context = imgui::Context::create();
         imgui_context.set_renderer_name(Some(imgui::ImString::from(String::from("Spark"))));
         imgui_context
@@ -228,7 +216,7 @@ impl Engine {
             exit_requested: false,
             timer: FrameTimer::new(64),
             demo_config_path,
-            demo_config,
+            demo_config: None,
         }
     }
 
@@ -236,7 +224,7 @@ impl Engine {
     fn reload_demo_config_file(&mut self) {
         if let Some(path) = &self.demo_config_path {
             // Attempt to load a new demo config
-            match load_config(&path) {
+            match DemoConfig::from_path(&path) {
                 Ok(demo_config) => {
                     self.demo_config = Some(demo_config);
 
@@ -258,7 +246,16 @@ impl Engine {
             let track_path =
                 DemoConfig::make_res_path(&self.demo_config_path, &demo_config.track_path);
             match AudioTrack::from_path(self.audio_device.clone(), &track_path) {
-                Ok(audio_track) => {
+                Ok(mut audio_track) => {
+                    // Attempt to copy the old track's state into the new track if possible
+                    if let Some(old_track) = &self.audio_track {
+                        audio_track
+                            .set_position(&old_track.get_position().unwrap_or_default())
+                            .ok();
+                        if old_track.is_playing() {
+                            audio_track.play().ok();
+                        }
+                    }
                     self.audio_track = Some(audio_track);
                 }
                 Err(err) => {
@@ -368,7 +365,7 @@ impl Engine {
                 *control_flow = ControlFlow::Poll;
 
                 // The demo config needs to be initialized once the window is created
-                self.reload_demo_config();
+                self.reload_demo_config_file();
             }
             _ => {
                 self.imgui_platform
@@ -585,17 +582,16 @@ impl Engine {
     }
 
     pub fn run() -> ! {
-        Self::run_with_config(None, None, None);
+        Self::run_with_config(None, None);
     }
 
     pub fn run_with_config(
         window_config: Option<WindowConfig>,
         demo_config_path: Option<String>,
-        demo_config: Option<DemoConfig>,
     ) -> ! {
         let mut builder = WindowBuilder::new();
         builder = builder.with_visible(false);
-        builder = builder.with_title(&build_window_title(&demo_config));
+        builder = builder.with_title(&build_window_title(&None));
 
         let window_config = window_config.unwrap_or_default();
         if let WindowConfig::Windowed { width, height } = window_config {
@@ -607,7 +603,7 @@ impl Engine {
         let event_loop = EventLoop::new();
         let window = builder.build(&event_loop).expect("Failed to create window");
 
-        let mut engine = Self::new(window, demo_config_path, demo_config);
+        let mut engine = Self::new(window, demo_config_path);
 
         event_loop.run(move |event, _, control_flow| {
             engine.handle_event(&event, control_flow);
