@@ -54,6 +54,9 @@ const IMGUI_FONT_TEXTURE_SLOT_INDEX: u64 = 0;
 /// Texture slot index associated with the render graph output
 const RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX: u64 = 1;
 
+/// Number of individual buffer slots available to shaders during a frame
+const NUM_BUFFER_SLOTS: u64 = 64;
+
 quick_error! {
     #[derive(Debug)]
     enum RendererError {
@@ -362,6 +365,12 @@ impl Renderer {
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(NUM_TEXTURE_SLOTS as u32)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(NUM_BUFFER_SLOTS as u32)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
                     .build(),
             ]),

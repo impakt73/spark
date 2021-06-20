@@ -22,8 +22,6 @@ pub struct RenderGraphImageParams {
 }
 
 pub enum RenderGraphResourceParams {
-    // TODO: Implement buffer resources
-    #[allow(dead_code)]
     Buffer(RenderGraphBufferParams),
     Image(RenderGraphImageParams),
 }
@@ -135,6 +133,7 @@ pub struct RenderGraph {
 }
 
 const NUM_IMAGE_SLOTS: u32 = 64;
+const NUM_BUFFER_SLOTS: u32 = 64;
 
 impl RenderGraph {
     pub fn new(desc: &RenderGraphDesc, renderer: &mut Renderer) -> Result<Self> {
@@ -170,10 +169,16 @@ impl RenderGraph {
             device.clone(),
             &vk::DescriptorPoolCreateInfo::builder()
                 .max_sets(num_frame_states)
-                .pool_sizes(&[vk::DescriptorPoolSize::builder()
-                    .ty(vk::DescriptorType::STORAGE_IMAGE)
-                    .descriptor_count(num_frame_states * (NUM_IMAGE_SLOTS as u32))
-                    .build()]),
+                .pool_sizes(&[
+                    vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::STORAGE_IMAGE)
+                        .descriptor_count(num_frame_states * (NUM_IMAGE_SLOTS as u32))
+                        .build(),
+                    vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::STORAGE_BUFFER)
+                        .descriptor_count(num_frame_states * (NUM_BUFFER_SLOTS as u32))
+                        .build(),
+                ]),
         )?;
 
         let mut frame_states = Vec::new();
@@ -275,28 +280,53 @@ impl RenderGraph {
                 }
             }
 
-            if image_descs.len() < NUM_IMAGE_SLOTS as usize {
-                let last_index = image_descs.len() - 1;
-                for _ in 0..(NUM_IMAGE_SLOTS as usize - image_descs.len()) {
-                    image_descs.push(image_descs[last_index]);
+            let mut desc_writes = Vec::new();
+
+            if !image_descs.is_empty() {
+                if image_descs.len() < NUM_IMAGE_SLOTS as usize {
+                    let last_index = image_descs.len() - 1;
+                    for _ in 0..(NUM_IMAGE_SLOTS as usize - image_descs.len()) {
+                        image_descs.push(image_descs[last_index]);
+                    }
                 }
+
+                let image_desc_write = vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_set)
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .image_info(&image_descs)
+                    .build();
+
+                desc_writes.push(image_desc_write);
             }
 
-            // TODO: Write Buffer Descs
+            if !buffer_descs.is_empty() {
+                if buffer_descs.len() < NUM_BUFFER_SLOTS as usize {
+                    let last_index = buffer_descs.len() - 1;
+                    for _ in 0..(NUM_BUFFER_SLOTS as usize - buffer_descs.len()) {
+                        buffer_descs.push(buffer_descs[last_index]);
+                    }
+                }
 
-            let image_desc_write = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_set)
-                .dst_binding(0)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                .image_info(&image_descs)
-                .build();
+                let buffer_desc_write = vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_set)
+                    .dst_binding(1)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_descs)
+                    .build();
 
-            unsafe {
-                device
-                    .upgrade()
-                    .unwrap()
-                    .update_descriptor_sets(&[image_desc_write], &[]);
+                desc_writes.push(buffer_desc_write);
+            }
+
+            if !desc_writes.is_empty() {
+                unsafe {
+                    device
+                        .upgrade()
+                        .unwrap()
+                        .update_descriptor_sets(&desc_writes, &[]);
+                }
             }
 
             frame_states.push(RenderGraphFrameState {
