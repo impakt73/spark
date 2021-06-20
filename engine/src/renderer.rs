@@ -1451,7 +1451,6 @@ impl Renderer {
                     );
                 }
 
-                // TODO: Allow appropriate nodes to overlap execution once dependencies are implemented.
                 device.cmd_pipeline_barrier(
                     cmd_buffer,
                     vk::PipelineStageFlags::COMPUTE_SHADER,
