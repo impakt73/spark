@@ -1,7 +1,10 @@
 use ash::{
     extensions::{ext, khr},
     version::{DeviceV1_0, EntryV1_0, InstanceV1_0},
-    vk,
+    vk::{
+        self, PhysicalDeviceFeatures2, PhysicalDeviceVulkan11Features,
+        PhysicalDeviceVulkan12Features,
+    },
 };
 use std::borrow::Cow;
 use std::ffi::{CStr, CString};
@@ -375,9 +378,29 @@ impl VkDevice {
                 })
                 .collect::<Vec<_>>();
 
+            let mut device_1_0_features = PhysicalDeviceFeatures2::default();
+            let mut device_1_1_features = PhysicalDeviceVulkan11Features::default();
+            let mut device_1_2_features = PhysicalDeviceVulkan12Features::default();
+
+            device_1_0_features.p_next =
+                &mut device_1_1_features as *mut PhysicalDeviceVulkan11Features as _;
+            device_1_1_features.p_next =
+                &mut device_1_2_features as *mut PhysicalDeviceVulkan12Features as _;
+
+            // Set up required shader features
+
+            device_1_0_features.features.shader_int16 = 1;
+            device_1_0_features.features.shader_int64 = 1;
+
+            device_1_1_features.storage_buffer16_bit_access = 1;
+
+            device_1_2_features.shader_buffer_int64_atomics = 1;
+            device_1_2_features.shader_shared_int64_atomics = 1;
+
             let device_create_info = vk::DeviceCreateInfo::builder()
                 .queue_create_infos(&queue_infos)
-                .enabled_extension_names(&device_extensions);
+                .enabled_extension_names(&device_extensions)
+                .push_next(&mut device_1_0_features);
 
             let device =
                 instance
