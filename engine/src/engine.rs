@@ -86,7 +86,7 @@ pub struct GraphConfigResource {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum GraphConfigResourceParams {
     Image,
-    Buffer,
+    Buffer { size: usize },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -307,9 +307,8 @@ impl Engine {
                                 format: vk::Format::R8G8B8A8_UNORM,
                             })
                         }
-                        GraphConfigResourceParams::Buffer => {
-                            // TODO: Support buffer resources
-                            RenderGraphResourceParams::Buffer(RenderGraphBufferParams { size: 0 })
+                        GraphConfigResourceParams::Buffer { size } => {
+                            RenderGraphResourceParams::Buffer(RenderGraphBufferParams { size })
                         }
                     };
                     RenderGraphResourceDesc {

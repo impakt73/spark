@@ -54,6 +54,9 @@ const IMGUI_FONT_TEXTURE_SLOT_INDEX: u64 = 0;
 /// Texture slot index associated with the render graph output
 const RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX: u64 = 1;
 
+/// Number of individual buffer slots available to shaders during a frame
+const NUM_BUFFER_SLOTS: u64 = 64;
+
 quick_error! {
     #[derive(Debug)]
     enum RendererError {
@@ -362,6 +365,12 @@ impl Renderer {
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(NUM_TEXTURE_SLOTS as u32)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(NUM_BUFFER_SLOTS as u32)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
                     .build(),
             ]),
@@ -1305,6 +1314,42 @@ impl Renderer {
             .write_all(swapchain_res_uint.as_byte_slice())
             .unwrap();
 
+        // TODO: Source camera parameters from applicaton
+
+        let proj_matrix = glam::Mat4::perspective_rh(
+            40.0_f32.to_radians(),
+            (self.swapchain.surface_resolution.width as f32)
+                / (self.swapchain.surface_resolution.height as f32),
+            0.1,
+            1000.0,
+        );
+
+        self.constant_writer
+            .write_all(bytemuck::bytes_of(&proj_matrix))
+            .unwrap();
+
+        let camera_pos = glam::vec3(
+            f32::sin(cur_time.as_secs_f32() * std::f32::consts::PI * 2.0 * 0.25) * 3.0,
+            1.5,
+            f32::cos(cur_time.as_secs_f32() * std::f32::consts::PI * 2.0 * 0.25) * 3.0,
+        );
+
+        let view_matrix = glam::Mat4::look_at_rh(
+            camera_pos,
+            glam::vec3(0.0, 0.0, 0.0),
+            glam::vec3(0.0, 1.0, 0.0),
+        );
+
+        self.constant_writer
+            .write_all(bytemuck::bytes_of(&view_matrix))
+            .unwrap();
+
+        let proj_view_matrix = proj_matrix * view_matrix;
+
+        self.constant_writer
+            .write_all(bytemuck::bytes_of(&proj_view_matrix))
+            .unwrap();
+
         unsafe {
             // Initialize all resources for the current frame state
             let mut image_barriers = Vec::new();
@@ -1406,7 +1451,6 @@ impl Renderer {
                     );
                 }
 
-                // TODO: Allow appropriate nodes to overlap execution once dependencies are implemented.
                 device.cmd_pipeline_barrier(
                     cmd_buffer,
                     vk::PipelineStageFlags::COMPUTE_SHADER,
