@@ -1,9 +1,8 @@
-use ash::vk;
 use imgui::{im_str, Slider};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::{
     collections::VecDeque,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -17,11 +16,7 @@ use crate::audio_device::{AudioDevice, AudioTrack};
 use crate::renderer::Renderer;
 use crate::{
     input_state::InputState,
-    render_graph::{
-        RenderGraph, RenderGraphBufferParams, RenderGraphDesc, RenderGraphDispatchDimensions,
-        RenderGraphImageParams, RenderGraphNodeDesc, RenderGraphPipelineSource,
-        RenderGraphResourceDesc, RenderGraphResourceParams,
-    },
+    render_graph::{RenderGraph, RenderGraphDesc},
 };
 
 use serde::{Deserialize, Serialize};
@@ -45,7 +40,7 @@ struct DemoConfig {
     group_name: String,
     demo_name: String,
     track_path: String,
-    graph: GraphConfig,
+    graph: RenderGraphDesc,
 }
 
 impl DemoConfig {
@@ -57,44 +52,27 @@ impl DemoConfig {
         Ok(demo_config)
     }
 
+    /// Returns the resource directory based the file path of a demo config
+    fn query_res_dir(config_path: &str) -> String {
+        let config_path = Path::new(&config_path);
+        Path::parent(config_path)
+            .expect("Unexpected demo config path format")
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
     /// Creates a resource path based the file path of a demo config
     fn make_res_path(config_path: &Option<String>, path: &str) -> String {
         if let Some(config_path) = config_path {
             let config_path = Path::new(config_path);
-            let res_dir = Path::parent(config_path).expect("Unexpected demo config path format");
+            let res_dir = PathBuf::from(&Self::query_res_dir(config_path.to_str().unwrap()));
             return res_dir.join(path).to_str().unwrap().to_string();
         } else {
             // Just return the original path if there's no demo config path to reference
             path.to_string()
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GraphConfig {
-    resources: Vec<GraphConfigResource>,
-    output_resource: Option<String>,
-    nodes: Vec<GraphConfigNode>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GraphConfigResource {
-    name: String,
-    params: GraphConfigResourceParams,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum GraphConfigResourceParams {
-    Image,
-    Buffer { size: usize },
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GraphConfigNode {
-    name: String,
-    pipeline: String,
-    refs: Vec<String>,
-    deps: Vec<String>,
 }
 
 /// Helper for measuring frame timer
@@ -269,64 +247,16 @@ impl Engine {
             // Idle the renderer before we modify any rendering resources
             self.renderer.wait_for_idle();
 
-            let (swapchain_width, swapchain_height) = self.renderer.get_swapchain_resolution();
+            let resource_dir = self
+                .demo_config_path
+                .as_ref()
+                .map(|path| DemoConfig::query_res_dir(&path));
 
-            let dispatch_dims = RenderGraphDispatchDimensions {
-                num_groups_x: ((swapchain_width + 7) & !7) / 8,
-                num_groups_y: ((swapchain_height + 3) & !3) / 4,
-                num_groups_z: 1,
-            };
-
-            let nodes = demo_config
-                .graph
-                .nodes
-                .iter()
-                .map(|config_node| {
-                    let pipeline_path =
-                        DemoConfig::make_res_path(&self.demo_config_path, &config_node.pipeline);
-                    RenderGraphNodeDesc {
-                        name: config_node.name.clone(),
-                        pipeline: RenderGraphPipelineSource::File(pipeline_path),
-                        refs: config_node.refs.clone(),
-                        dims: dispatch_dims,
-                        deps: config_node.deps.clone(),
-                    }
-                })
-                .collect::<Vec<RenderGraphNodeDesc>>();
-
-            let resources = demo_config
-                .graph
-                .resources
-                .iter()
-                .map(|config_resource| {
-                    let params = match config_resource.params {
-                        GraphConfigResourceParams::Image => {
-                            RenderGraphResourceParams::Image(RenderGraphImageParams {
-                                width: swapchain_width,
-                                height: swapchain_height,
-                                format: vk::Format::R8G8B8A8_UNORM,
-                            })
-                        }
-                        GraphConfigResourceParams::Buffer { size } => {
-                            RenderGraphResourceParams::Buffer(RenderGraphBufferParams { size })
-                        }
-                    };
-                    RenderGraphResourceDesc {
-                        name: config_resource.name.clone(),
-                        params,
-                    }
-                })
-                .collect::<Vec<RenderGraphResourceDesc>>();
-
-            let output_image_name = demo_config.graph.output_resource.clone();
-
-            let render_graph_desc = RenderGraphDesc {
-                resources,
-                nodes,
-                output_image_name,
-            };
-
-            match RenderGraph::new(&render_graph_desc, &mut self.renderer) {
+            match RenderGraph::new(
+                &demo_config.graph,
+                resource_dir.as_deref(),
+                &mut self.renderer,
+            ) {
                 Ok(graph) => {
                     self.graph = Some(graph);
                 }

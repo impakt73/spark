@@ -17,7 +17,7 @@ use imgui::internal::RawWrapper;
 use std::slice;
 use vkutil::*;
 
-use crate::render_graph::{RenderGraph, RenderGraphResource};
+use crate::render_graph::{RenderGraph, RenderGraphDispatchParams};
 use crate::render_util::ConstantDataWriter;
 
 use std::default::Default;
@@ -691,6 +691,10 @@ impl Renderer {
         )
     }
 
+    pub fn get_swapchain_format(&self) -> vk::Format {
+        self.swapchain.surface_format.format
+    }
+
     pub fn recreate_swapchain(&mut self, window: &winit::window::Window) -> Result<()> {
         println!(
             "Recreating {}x{} swapchain!",
@@ -1354,35 +1358,26 @@ impl Renderer {
             // Initialize all resources for the current frame state
             let mut image_barriers = Vec::new();
 
-            for resource in &graph_frame_state.resources {
-                match resource {
-                    RenderGraphResource::Buffer(_) => {
-                        // Do nothing
-                    }
-                    RenderGraphResource::Image(render_graph_image) => {
-                        let image_barrier = vk::ImageMemoryBarrier::builder()
-                            .src_access_mask(vk::AccessFlags::empty())
-                            .dst_access_mask(
-                                vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
-                            )
-                            .old_layout(vk::ImageLayout::UNDEFINED)
-                            .new_layout(vk::ImageLayout::GENERAL)
-                            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                            .image(render_graph_image.image.raw())
-                            .subresource_range(
-                                vk::ImageSubresourceRange::builder()
-                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                    .base_mip_level(0)
-                                    .level_count(1)
-                                    .base_array_layer(0)
-                                    .layer_count(1)
-                                    .build(),
-                            )
-                            .build();
-                        image_barriers.push(image_barrier);
-                    }
-                }
+            for render_graph_image in &graph_frame_state.images {
+                let image_barrier = vk::ImageMemoryBarrier::builder()
+                    .src_access_mask(vk::AccessFlags::empty())
+                    .dst_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)
+                    .old_layout(vk::ImageLayout::UNDEFINED)
+                    .new_layout(vk::ImageLayout::GENERAL)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .image(render_graph_image.image.raw())
+                    .subresource_range(
+                        vk::ImageSubresourceRange::builder()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1)
+                            .build(),
+                    )
+                    .build();
+                image_barriers.push(image_barrier);
             }
 
             if !image_barriers.is_empty() {
@@ -1443,25 +1438,40 @@ impl Renderer {
                         &push_constants.align_to::<u8>().1,
                     );
 
-                    device.cmd_dispatch(
-                        cmd_buffer,
-                        node.dims.num_groups_x,
-                        node.dims.num_groups_y,
-                        node.dims.num_groups_z,
-                    );
+                    match &node.dispatch {
+                        RenderGraphDispatchParams::Direct(direct) => {
+                            device.cmd_dispatch(
+                                cmd_buffer,
+                                direct.num_groups_x,
+                                direct.num_groups_y,
+                                direct.num_groups_z,
+                            );
+                        }
+                        RenderGraphDispatchParams::Indirect(indirect) => {
+                            let buffer =
+                                &graph_frame_state.buffers[indirect.buffer.index() as usize];
+                            device.cmd_dispatch_indirect(
+                                cmd_buffer,
+                                buffer.buffer.raw(),
+                                indirect.buffer_offset as u64,
+                            );
+                        }
+                    }
                 }
 
                 device.cmd_pipeline_barrier(
                     cmd_buffer,
                     vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::PipelineStageFlags::COMPUTE_SHADER | vk::PipelineStageFlags::DRAW_INDIRECT,
                     vk::DependencyFlags::empty(),
                     &[vk::MemoryBarrier::builder()
                         .src_access_mask(
                             vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
                         )
                         .dst_access_mask(
-                            vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                            vk::AccessFlags::SHADER_READ
+                                | vk::AccessFlags::SHADER_WRITE
+                                | vk::AccessFlags::INDIRECT_COMMAND_READ,
                         )
                         .build()],
                     &[],

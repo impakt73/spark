@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -7,56 +8,81 @@ use ash::{version::DeviceV1_0, vk};
 
 use vkutil::*;
 
+use serde::{Deserialize, Serialize};
+
 use crate::renderer::Renderer;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RenderGraphBufferParams {
     pub size: usize,
 }
 
-pub struct RenderGraphImageParams {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenderGraphFixedImageParams {
     pub width: u32,
     pub height: u32,
-    pub format: vk::Format,
+    pub format: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub enum RenderGraphImageParams {
+    SwapchainCompatible,
+    Fixed(RenderGraphFixedImageParams),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum RenderGraphResourceParams {
     Buffer(RenderGraphBufferParams),
     Image(RenderGraphImageParams),
 }
 
-pub enum RenderGraphPipelineSource<'a> {
+#[derive(Serialize, Deserialize, Debug)]
+pub enum RenderGraphPipelineSource {
     File(String),
-    #[allow(dead_code)]
-    Buffer(&'a [u32]),
 }
 
-pub struct RenderGraphNodeDesc<'a> {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenderGraphNodeDesc {
     pub name: String,
-    pub pipeline: RenderGraphPipelineSource<'a>,
+    pub pipeline: RenderGraphPipelineSource,
     /// Referenced by shader like uTextures[Inputs[0]] where Inputs = push constants array
     pub refs: Vec<String>,
-    pub dims: RenderGraphDispatchDimensions,
+    pub dispatch: RenderGraphDispatchDesc,
     pub deps: Vec<String>,
 }
 
-#[derive(Clone, Copy)]
-pub struct RenderGraphDispatchDimensions {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenderGraphDirectDispatchDesc {
     pub num_groups_x: u32,
     pub num_groups_y: u32,
     pub num_groups_z: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenderGraphIndirectDispatchDesc {
+    pub buffer: String,
+    pub offset: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum RenderGraphDispatchDesc {
+    Direct(RenderGraphDirectDispatchDesc),
+    Indirect(RenderGraphIndirectDispatchDesc),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RenderGraphResourceDesc {
     pub name: String,
     pub params: RenderGraphResourceParams,
 }
 
 // TODO: Replace Vecs with slices
-pub struct RenderGraphDesc<'a> {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenderGraphDesc {
     pub resources: Vec<RenderGraphResourceDesc>,
-    pub nodes: Vec<RenderGraphNodeDesc<'a>>,
+    pub nodes: Vec<RenderGraphNodeDesc>,
     pub output_image_name: Option<String>,
 }
 
@@ -83,10 +109,26 @@ impl Default for ResourceReference {
     }
 }
 
+pub struct RenderGraphDirectDispatchParams {
+    pub num_groups_x: u32,
+    pub num_groups_y: u32,
+    pub num_groups_z: u32,
+}
+
+pub struct RenderGraphIndirectDispatchParams {
+    pub buffer: ResourceReference,
+    pub buffer_offset: usize,
+}
+
+pub enum RenderGraphDispatchParams {
+    Direct(RenderGraphDirectDispatchParams),
+    Indirect(RenderGraphIndirectDispatchParams),
+}
+
 pub struct RenderGraphNode {
     pub pipeline: VkPipeline,
     pub refs: Vec<ResourceReference>,
-    pub dims: RenderGraphDispatchDimensions,
+    pub dispatch: RenderGraphDispatchParams,
 }
 
 impl RenderGraphNode {
@@ -108,18 +150,23 @@ pub struct RenderGraphBuffer {
     pub buffer: VkBuffer,
 }
 
-pub enum RenderGraphResource {
-    Image(RenderGraphImage),
-    Buffer(RenderGraphBuffer),
-}
-
 pub struct RenderGraphFrameState {
-    pub resources: Vec<RenderGraphResource>,
+    pub buffers: Vec<RenderGraphBuffer>,
+    pub images: Vec<RenderGraphImage>,
     pub descriptor_set: vk::DescriptorSet,
 }
 
 pub struct RenderGraphBatch {
     pub node_indices: Vec<usize>,
+}
+
+/// Attempts to convert a string into a VkFormat enum
+fn vk_format_from_string(string: &str) -> vk::Format {
+    match string {
+        "rgba8" => vk::Format::R8G8B8A8_UNORM,
+        "r32" => vk::Format::R32_UINT,
+        _ => vk::Format::UNDEFINED,
+    }
 }
 
 pub struct RenderGraph {
@@ -136,7 +183,11 @@ const NUM_IMAGE_SLOTS: u32 = 64;
 const NUM_BUFFER_SLOTS: u32 = 64;
 
 impl RenderGraph {
-    pub fn new(desc: &RenderGraphDesc, renderer: &mut Renderer) -> Result<Self> {
+    pub fn new(
+        desc: &RenderGraphDesc,
+        resource_dir: Option<&str>,
+        renderer: &mut Renderer,
+    ) -> Result<Self> {
         let device = Arc::downgrade(&renderer.get_device());
         let allocator = renderer.get_allocator();
         let num_frame_states = renderer.get_num_frame_states() as u32;
@@ -186,9 +237,13 @@ impl RenderGraph {
             let descriptor_set = descriptor_pool
                 .allocate_descriptor_set(renderer.get_graph_descriptor_set_layout().raw())?;
 
-            let mut resources = Vec::new();
+            let mut buffers = Vec::new();
+            let mut images = Vec::new();
             let mut buffer_descs = Vec::new();
             let mut image_descs = Vec::new();
+
+            let (swapchain_width, swapchain_height) = renderer.get_swapchain_resolution();
+            let swapchain_format = renderer.get_swapchain_format();
 
             for resource_desc in &desc.resources {
                 match &resource_desc.params {
@@ -198,7 +253,10 @@ impl RenderGraph {
                                 allocator.clone(),
                                 &vk::BufferCreateInfo::builder()
                                     .size(params.size as u64)
-                                    .usage(vk::BufferUsageFlags::STORAGE_BUFFER),
+                                    .usage(
+                                        vk::BufferUsageFlags::STORAGE_BUFFER
+                                            | vk::BufferUsageFlags::INDIRECT_BUFFER,
+                                    ),
                                 &vk_mem::AllocationCreateInfo {
                                     usage: vk_mem::MemoryUsage::GpuOnly,
                                     ..Default::default()
@@ -213,22 +271,35 @@ impl RenderGraph {
                             .build();
                         buffer_descs.push(desc);
 
-                        let resource = RenderGraphResource::Buffer(buffer_resource);
-                        resources.push(resource);
+                        buffers.push(buffer_resource);
                     }
                     RenderGraphResourceParams::Image(params) => {
+                        let image_extent = match &params {
+                            RenderGraphImageParams::SwapchainCompatible => vk::Extent3D {
+                                width: swapchain_width,
+                                height: swapchain_height,
+                                depth: 1,
+                            },
+                            RenderGraphImageParams::Fixed(fixed_params) => vk::Extent3D {
+                                width: fixed_params.width,
+                                height: fixed_params.height,
+                                depth: 1,
+                            },
+                        };
+                        let image_format = match &params {
+                            RenderGraphImageParams::SwapchainCompatible => swapchain_format,
+                            RenderGraphImageParams::Fixed(fixed_params) => {
+                                vk_format_from_string(&fixed_params.format)
+                            }
+                        };
                         let vk_image = VkImage::new(
                             allocator.clone(),
                             &vk::ImageCreateInfo::builder()
                                 .image_type(vk::ImageType::TYPE_2D)
-                                .extent(vk::Extent3D {
-                                    width: params.width,
-                                    height: params.height,
-                                    depth: 1,
-                                })
+                                .extent(image_extent)
                                 .mip_levels(1)
                                 .array_layers(1)
-                                .format(params.format)
+                                .format(image_format)
                                 .tiling(vk::ImageTiling::OPTIMAL)
                                 .initial_layout(vk::ImageLayout::UNDEFINED)
                                 .usage(vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED)
@@ -244,7 +315,7 @@ impl RenderGraph {
                             &vk::ImageViewCreateInfo::builder()
                                 .image(vk_image.raw())
                                 .view_type(vk::ImageViewType::TYPE_2D)
-                                .format(params.format)
+                                .format(image_format)
                                 .components(
                                     vk::ComponentMapping::builder()
                                         .r(vk::ComponentSwizzle::IDENTITY)
@@ -274,8 +345,7 @@ impl RenderGraph {
                             .build();
                         image_descs.push(desc);
 
-                        let resource = RenderGraphResource::Image(image_resource);
-                        resources.push(resource);
+                        images.push(image_resource);
                     }
                 }
             }
@@ -330,7 +400,8 @@ impl RenderGraph {
             }
 
             frame_states.push(RenderGraphFrameState {
-                resources,
+                buffers,
+                images,
                 descriptor_set,
             });
         }
@@ -343,17 +414,26 @@ impl RenderGraph {
                     .copied()
                     .ok_or("invalid input reference")?;
             }
+
+            if let RenderGraphDispatchDesc::Indirect(dispatch_desc) = &node.dispatch {
+                resource_mapping
+                    .get(&dispatch_desc.buffer)
+                    .copied()
+                    .ok_or("Invalid dispatch indirect buffer")?;
+            }
         }
 
         let mut node_mapping = HashMap::new();
         let mut nodes = Vec::new();
         for node_desc in &desc.nodes {
             let pipeline = match &node_desc.pipeline {
-                RenderGraphPipelineSource::File(file_path) => {
-                    renderer.create_compute_pipeline_from_file(file_path)?
-                }
-                RenderGraphPipelineSource::Buffer(buffer) => {
-                    renderer.create_compute_pipeline_from_buffer(buffer)?
+                RenderGraphPipelineSource::File(filename) => {
+                    let path = if let Some(res_dir_path) = resource_dir {
+                        Path::new(res_dir_path).join(filename)
+                    } else {
+                        PathBuf::from(filename)
+                    };
+                    renderer.create_compute_pipeline_from_file(path.to_str().unwrap())?
                 }
             };
             let refs = node_desc
@@ -361,11 +441,28 @@ impl RenderGraph {
                 .iter()
                 .map(|name| *resource_mapping.get(name).unwrap())
                 .collect();
-            let dims = node_desc.dims;
+
+            let dispatch = match &node_desc.dispatch {
+                RenderGraphDispatchDesc::Direct(dispatch_desc) => {
+                    RenderGraphDispatchParams::Direct(RenderGraphDirectDispatchParams {
+                        num_groups_x: dispatch_desc.num_groups_x,
+                        num_groups_y: dispatch_desc.num_groups_y,
+                        num_groups_z: dispatch_desc.num_groups_z,
+                    })
+                }
+                RenderGraphDispatchDesc::Indirect(dispatch_desc) => {
+                    let buffer = *resource_mapping.get(&dispatch_desc.buffer).unwrap();
+                    RenderGraphDispatchParams::Indirect(RenderGraphIndirectDispatchParams {
+                        buffer,
+                        buffer_offset: dispatch_desc.offset,
+                    })
+                }
+            };
+
             let node = RenderGraphNode {
                 pipeline,
                 refs,
-                dims,
+                dispatch,
             };
 
             // Track the index of each render graph node to help with dependency lookup later
@@ -437,12 +534,9 @@ impl RenderGraph {
 
     pub fn get_output_image(&self, cur_frame_idx: usize) -> Option<&VkImageView> {
         if let Some(idx) = self.output_image_idx {
-            if let RenderGraphResource::Image(image) =
-                &self.frame_states[cur_frame_idx].resources[idx]
-            {
-                return Some(&image.view);
-            }
+            Some(&self.frame_states[cur_frame_idx].images[idx].view)
+        } else {
+            None
         }
-        None
     }
 }
