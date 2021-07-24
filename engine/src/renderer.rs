@@ -1459,6 +1459,14 @@ impl Renderer {
                     }
                 }
 
+                // TODO: Usage of VkMemoryBarrier seems to automatically trigger L2 flush/invalidation which will
+                //       prevent any interesting L2-based optimizations and might make indirect dispatches slower.
+                //       We should switch to explicit image/buffer barriers to prevent this from happening.
+                //
+                //       Also, the indirect bits in the barrier should be removed when possible to prevent unnecessary
+                //       PFP syncs. Indirect bits should only be necessary when the NEXT batch in the graph contains an
+                //       indirect dispatch. (To really take advantage of this, we'll need to support some sort of
+                //       "swapchain sized" direct dispatch concept.)
                 device.cmd_pipeline_barrier(
                     cmd_buffer,
                     vk::PipelineStageFlags::COMPUTE_SHADER,
