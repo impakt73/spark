@@ -187,7 +187,6 @@ pub struct Renderer {
     allocator: Arc<vk_mem::Allocator>,
     surface: VkSurface,
     device: VkDevice,
-    #[allow(dead_code)]
     debug_messenger: Option<VkDebugMessenger>,
     instance: VkInstance,
 }
@@ -1354,6 +1353,10 @@ impl Renderer {
             .write_all(bytemuck::bytes_of(&proj_view_matrix))
             .unwrap();
 
+        if let Some(debug_messenger) = &mut self.debug_messenger {
+            debug_messenger.begin_label(cmd_buffer, &format!("Graph [{}]", graph.name));
+        }
+
         unsafe {
             // Initialize all resources for the current frame state
             let mut image_barriers = Vec::new();
@@ -1381,6 +1384,10 @@ impl Renderer {
             }
 
             if !image_barriers.is_empty() {
+                if let Some(debug_messenger) = &mut self.debug_messenger {
+                    debug_messenger.begin_label(cmd_buffer, "Initialization");
+                }
+
                 device.cmd_pipeline_barrier(
                     cmd_buffer,
                     vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -1390,6 +1397,10 @@ impl Renderer {
                     &[],
                     &image_barriers,
                 );
+
+                if let Some(debug_messenger) = &mut self.debug_messenger {
+                    debug_messenger.end_label(cmd_buffer);
+                }
             }
 
             // We don't actually use this set on GFX, but it is available in the fragment shaders.
@@ -1412,9 +1423,20 @@ impl Renderer {
                 &[],
             );
 
-            for batch in &graph.batches {
+            for (batch_id, batch) in graph.batches.iter().enumerate() {
+                if let Some(debug_messenger) = &mut self.debug_messenger {
+                    debug_messenger.begin_label(
+                        cmd_buffer,
+                        &format!("Batch [{}/{}]", batch_id + 1, graph.batches.len()),
+                    );
+                }
+
                 for node_index in &batch.node_indices {
                     let node = &graph.nodes[*node_index];
+
+                    if let Some(debug_messenger) = &mut self.debug_messenger {
+                        debug_messenger.begin_label(cmd_buffer, &format!("Node [{}]", node.name));
+                    }
 
                     device.cmd_bind_pipeline(
                         cmd_buffer,
@@ -1457,6 +1479,14 @@ impl Renderer {
                             );
                         }
                     }
+
+                    if let Some(debug_messenger) = &mut self.debug_messenger {
+                        debug_messenger.end_label(cmd_buffer);
+                    }
+                }
+
+                if let Some(debug_messenger) = &mut self.debug_messenger {
+                    debug_messenger.end_label(cmd_buffer);
                 }
 
                 // TODO: Usage of VkMemoryBarrier seems to automatically trigger L2 flush/invalidation which will
@@ -1486,6 +1516,10 @@ impl Renderer {
                     &[],
                 );
             }
+        }
+
+        if let Some(debug_messenger) = &mut self.debug_messenger {
+            debug_messenger.end_label(cmd_buffer);
         }
 
         Ok(())

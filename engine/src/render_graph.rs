@@ -81,6 +81,7 @@ pub struct RenderGraphResourceDesc {
 // TODO: Replace Vecs with slices
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RenderGraphDesc {
+    pub name: String,
     pub resources: Vec<RenderGraphResourceDesc>,
     pub nodes: Vec<RenderGraphNodeDesc>,
     pub output_image_name: Option<String>,
@@ -126,6 +127,7 @@ pub enum RenderGraphDispatchParams {
 }
 
 pub struct RenderGraphNode {
+    pub name: String,
     pub pipeline: VkPipeline,
     pub refs: Vec<ResourceReference>,
     pub dispatch: RenderGraphDispatchParams,
@@ -170,6 +172,7 @@ fn vk_format_from_string(string: &str) -> vk::Format {
 }
 
 pub struct RenderGraph {
+    pub name: String,
     pub nodes: Vec<RenderGraphNode>,
     pub batches: Vec<RenderGraphBatch>,
     /// Used for lifetime purposes
@@ -460,6 +463,7 @@ impl RenderGraph {
             };
 
             let node = RenderGraphNode {
+                name: node_desc.name.clone(),
                 pipeline,
                 refs,
                 dispatch,
@@ -524,6 +528,7 @@ impl RenderGraph {
         }
 
         Ok(Self {
+            name: desc.name.clone(),
             nodes,
             batches,
             descriptor_pool,

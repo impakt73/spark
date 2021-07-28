@@ -1,3 +1,12 @@
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64                    : require
+
+#extension GL_KHR_shader_subgroup_basic                  : require
+#extension GL_KHR_shader_subgroup_vote                   : require
+#extension GL_KHR_shader_subgroup_ballot                 : require
+#extension GL_KHR_shader_subgroup_quad                   : require
+#extension GL_KHR_shader_subgroup_arithmetic             : require
+
 #include "GlobalBindings.glsl"
 #include "GraphicsBindings.glsl"
 #include "GraphBindings.glsl"
