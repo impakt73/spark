@@ -277,6 +277,24 @@ impl VkDebugMessenger {
             })
         }
     }
+
+    pub fn begin_label(&mut self, cmd_buffer: vk::CommandBuffer, label: &str) {
+        let label_cstr = CString::new(label).unwrap();
+        let debug_label = vk::DebugUtilsLabelEXT::builder()
+            .label_name(&label_cstr)
+            .build();
+        unsafe {
+            self.debug_messenger_ext
+                .cmd_begin_debug_utils_label(cmd_buffer, &debug_label);
+        }
+    }
+
+    pub fn end_label(&mut self, cmd_buffer: vk::CommandBuffer) {
+        unsafe {
+            self.debug_messenger_ext
+                .cmd_end_debug_utils_label(cmd_buffer);
+        }
+    }
 }
 
 impl Drop for VkDebugMessenger {
