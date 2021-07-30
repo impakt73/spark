@@ -24,6 +24,8 @@ shaderc             = { version = "0.7", optional = true }
 quick-error         = "2"
 bytemuck            = "1.7"
 glam                = { version = "0.16", features = ["bytemuck"] }
+tracing             = "0.1"
+tracing-subscriber  = "0.2"
 
 [features]
 tools = ["shaderc"]

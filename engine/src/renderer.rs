@@ -35,6 +35,8 @@ use crate::tools::ShaderCompiler;
 
 use quick_error::quick_error;
 
+use crate::log::*;
+
 /// Selects a physical device from the provided list
 fn select_physical_device(physical_devices: &[vk::PhysicalDevice]) -> vk::PhysicalDevice {
     // TODO: Support proper physical device selection
@@ -695,7 +697,7 @@ impl Renderer {
     }
 
     pub fn recreate_swapchain(&mut self, window: &winit::window::Window) -> Result<()> {
-        println!(
+        info!(
             "Recreating {}x{} swapchain!",
             window.inner_size().width,
             window.inner_size().height

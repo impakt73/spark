@@ -21,6 +21,8 @@ use crate::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::log::*;
+
 pub enum WindowConfig {
     Windowed { width: u32, height: u32 },
     Fullscreen,
@@ -210,7 +212,7 @@ impl Engine {
                     self.reload_demo_config();
                 }
                 Err(err) => {
-                    println!("Failed to load demo config: {} ({})", path, err);
+                    error!("Failed to load demo config: {} ({})", path, err);
                 }
             }
         }
@@ -237,7 +239,7 @@ impl Engine {
                     self.audio_track = Some(audio_track);
                 }
                 Err(err) => {
-                    println!(
+                    error!(
                         "Failed to load audio track: {} ({})",
                         demo_config.track_path, err
                     );
@@ -261,7 +263,7 @@ impl Engine {
                     self.graph = Some(graph);
                 }
                 Err(err) => {
-                    println!("Failed to load render graph: {}", err);
+                    error!("Failed to load render graph: {}", err);
                 }
             }
         }
@@ -271,7 +273,7 @@ impl Engine {
         self.renderer.wait_for_idle();
         if let Some(track) = &mut self.audio_track {
             if let Err(err) = track.stop() {
-                println!("Failed to stop audio track: {}", err);
+                error!("Failed to stop audio track: {}", err);
             }
         }
     }
@@ -345,7 +347,7 @@ impl Engine {
                 && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
             {
                 if let Err(err) = track.toggle_pause() {
-                    println!("Failed to toggle audio track playback: {}", err);
+                    error!("Failed to toggle audio track playback: {}", err);
                 }
             }
             if !track.is_playing() {
@@ -365,11 +367,11 @@ impl Engine {
                 let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
                 if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
                     if let Err(err) = track.subtract_position_offset(&offset) {
-                        println!("Failed to rewind audio track: {}", err);
+                        error!("Failed to rewind audio track: {}", err);
                     }
                 } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
                     if let Err(err) = track.add_position_offset(&offset) {
-                        println!("Failed to fast-forward audio track: {}", err);
+                        error!("Failed to fast-forward audio track: {}", err);
                     }
                 }
             }
