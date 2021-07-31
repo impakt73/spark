@@ -3,7 +3,6 @@
 use spark::engine::Engine;
 
 fn init_logging() {
-    use tracing::{event, Level};
     use tracing_subscriber::{prelude::*, registry::Registry};
 
     let registry = Registry::default();
