@@ -7,6 +7,10 @@
 #extension GL_KHR_shader_subgroup_quad                   : require
 #extension GL_KHR_shader_subgroup_arithmetic             : require
 
+#define NUM_BUFFER_SLOTS  8
+#define NUM_IMAGE_SLOTS   NUM_BUFFER_SLOTS
+#define NUM_TEXTURE_SLOTS NUM_BUFFER_SLOTS
+
 #include "GlobalBindings.glsl"
 #include "GraphicsBindings.glsl"
 #include "GraphBindings.glsl"

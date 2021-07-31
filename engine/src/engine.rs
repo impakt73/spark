@@ -21,6 +21,8 @@ use crate::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::log::*;
+
 pub enum WindowConfig {
     Windowed { width: u32, height: u32 },
     Fullscreen,
@@ -202,7 +204,7 @@ impl Engine {
     fn reload_demo_config_file(&mut self) {
         if let Some(path) = &self.demo_config_path {
             // Attempt to load a new demo config
-            match DemoConfig::from_path(&path) {
+            match DemoConfig::from_path(path) {
                 Ok(demo_config) => {
                     self.demo_config = Some(demo_config);
 
@@ -210,7 +212,7 @@ impl Engine {
                     self.reload_demo_config();
                 }
                 Err(err) => {
-                    println!("Failed to load demo config: {} ({})", path, err);
+                    error!("Failed to load demo config: {} ({})", path, err);
                 }
             }
         }
@@ -237,7 +239,7 @@ impl Engine {
                     self.audio_track = Some(audio_track);
                 }
                 Err(err) => {
-                    println!(
+                    error!(
                         "Failed to load audio track: {} ({})",
                         demo_config.track_path, err
                     );
@@ -250,7 +252,7 @@ impl Engine {
             let resource_dir = self
                 .demo_config_path
                 .as_ref()
-                .map(|path| DemoConfig::query_res_dir(&path));
+                .map(|path| DemoConfig::query_res_dir(path));
 
             match RenderGraph::new(
                 &demo_config.graph,
@@ -261,7 +263,7 @@ impl Engine {
                     self.graph = Some(graph);
                 }
                 Err(err) => {
-                    println!("Failed to load render graph: {}", err);
+                    error!("Failed to load render graph: {}", err);
                 }
             }
         }
@@ -271,7 +273,7 @@ impl Engine {
         self.renderer.wait_for_idle();
         if let Some(track) = &mut self.audio_track {
             if let Err(err) = track.stop() {
-                println!("Failed to stop audio track: {}", err);
+                error!("Failed to stop audio track: {}", err);
             }
         }
     }
@@ -298,7 +300,7 @@ impl Engine {
             }
             _ => {
                 self.imgui_platform
-                    .handle_event(self.imgui_context.io_mut(), &self.window, &event);
+                    .handle_event(self.imgui_context.io_mut(), &self.window, event);
 
                 match event {
                     Event::WindowEvent { event, .. } => match event {
@@ -345,7 +347,7 @@ impl Engine {
                 && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
             {
                 if let Err(err) = track.toggle_pause() {
-                    println!("Failed to toggle audio track playback: {}", err);
+                    error!("Failed to toggle audio track playback: {}", err);
                 }
             }
             if !track.is_playing() {
@@ -365,11 +367,11 @@ impl Engine {
                 let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
                 if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
                     if let Err(err) = track.subtract_position_offset(&offset) {
-                        println!("Failed to rewind audio track: {}", err);
+                        error!("Failed to rewind audio track: {}", err);
                     }
                 } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
                     if let Err(err) = track.add_position_offset(&offset) {
-                        println!("Failed to fast-forward audio track: {}", err);
+                        error!("Failed to fast-forward audio track: {}", err);
                     }
                 }
             }
