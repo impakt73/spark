@@ -10,7 +10,7 @@ use vkutil::*;
 
 use serde::{Deserialize, Serialize};
 
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, NUM_IMAGE_SLOTS, NUM_BUFFER_SLOTS};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -181,9 +181,6 @@ pub struct RenderGraph {
     pub frame_states: Vec<RenderGraphFrameState>,
     output_image_idx: Option<usize>,
 }
-
-const NUM_IMAGE_SLOTS: u32 = 64;
-const NUM_BUFFER_SLOTS: u32 = 64;
 
 impl RenderGraph {
     pub fn new(

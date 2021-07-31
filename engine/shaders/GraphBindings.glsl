@@ -1,10 +1,10 @@
-layout(set = 1, binding = 0, rgba8) uniform image2D uImages[64];
+layout(set = 1, binding = 0, rgba8) uniform image2D uImages[NUM_IMAGE_SLOTS];
 layout(std430, set = 1, binding = 1) restrict buffer Buffers
 {
     uint Data[];
-} uBuffers[64];
+} uBuffers[NUM_BUFFER_SLOTS];
 
 layout(std430, set = 1, binding = 1) restrict buffer Buffers64
 {
     uint64_t Data[];
-} uBuffers64[64];
+} uBuffers64[NUM_BUFFER_SLOTS];

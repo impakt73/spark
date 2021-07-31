@@ -47,17 +47,19 @@ fn select_physical_device(physical_devices: &[vk::PhysicalDevice]) -> vk::Physic
 /// Size of the scratch memory buffer in bytes that is available to each frame
 const FRAME_MEMORY_SIZE: u64 = 8 * 1024 * 1024;
 
+/// Number of individual buffer slots available to shaders during a frame
+pub(crate) const NUM_BUFFER_SLOTS: u64 = 8;
+
 /// Number of individual texture slots available to shaders during a frame
-const NUM_TEXTURE_SLOTS: u64 = 64;
+pub(crate) const NUM_TEXTURE_SLOTS: u64 = NUM_BUFFER_SLOTS;
+
+pub(crate) const NUM_IMAGE_SLOTS: u64 = NUM_BUFFER_SLOTS;
 
 /// Texture slot index associated with the imgui font
 const IMGUI_FONT_TEXTURE_SLOT_INDEX: u64 = 0;
 
 /// Texture slot index associated with the render graph output
 const RENDER_GRAPH_OUTPUT_TEXTURE_SLOT_INDEX: u64 = 1;
-
-/// Number of individual buffer slots available to shaders during a frame
-const NUM_BUFFER_SLOTS: u64 = 64;
 
 quick_error! {
     #[derive(Debug)]
