@@ -1,6 +1,6 @@
 use ash::{
     version::{DeviceV1_0, InstanceV1_0},
-    vk,
+    vk::{self, SubpassDependency},
 };
 use imgui::{DrawCmd, DrawCmdParams};
 
@@ -277,6 +277,14 @@ impl Renderer {
         let renderpass = VkRenderPass::new(
             device.raw(),
             &vk::RenderPassCreateInfo::builder()
+                .dependencies(&[SubpassDependency::builder()
+                    .src_subpass(vk::SUBPASS_EXTERNAL)
+                    .dst_subpass(0)
+                    .src_stage_mask(vk::PipelineStageFlags::COMPUTE_SHADER)
+                    .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+                    .src_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                    .build()])
                 .attachments(&[vk::AttachmentDescription::builder()
                     .format(surface_format.format)
                     .samples(vk::SampleCountFlags::TYPE_1)
@@ -1493,32 +1501,36 @@ impl Renderer {
                     debug_messenger.end_label(cmd_buffer);
                 }
 
-                // TODO: Usage of VkMemoryBarrier seems to automatically trigger L2 flush/invalidation which will
-                //       prevent any interesting L2-based optimizations and might make indirect dispatches slower.
-                //       We should switch to explicit image/buffer barriers to prevent this from happening.
-                //
-                //       Also, the indirect bits in the barrier should be removed when possible to prevent unnecessary
-                //       PFP syncs. Indirect bits should only be necessary when the NEXT batch in the graph contains an
-                //       indirect dispatch. (To really take advantage of this, we'll need to support some sort of
-                //       "swapchain sized" direct dispatch concept.)
-                device.cmd_pipeline_barrier(
-                    cmd_buffer,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::PipelineStageFlags::COMPUTE_SHADER | vk::PipelineStageFlags::DRAW_INDIRECT,
-                    vk::DependencyFlags::empty(),
-                    &[vk::MemoryBarrier::builder()
-                        .src_access_mask(
-                            vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
-                        )
-                        .dst_access_mask(
-                            vk::AccessFlags::SHADER_READ
-                                | vk::AccessFlags::SHADER_WRITE
-                                | vk::AccessFlags::INDIRECT_COMMAND_READ,
-                        )
-                        .build()],
-                    &[],
-                    &[],
-                );
+                // We must always insert barriers in-between batches to ensure that they don't overlap execution
+                if batch_id != (graph.batches.len() - 1) {
+                    // TODO: Usage of VkMemoryBarrier seems to automatically trigger L2 flush/invalidation which will
+                    //       prevent any interesting L2-based optimizations and might make indirect dispatches slower.
+                    //       We should switch to explicit image/buffer barriers to prevent this from happening.
+                    //
+                    //       Also, the indirect bits in the barrier should be removed when possible to prevent unnecessary
+                    //       PFP syncs. Indirect bits should only be necessary when the NEXT batch in the graph contains an
+                    //       indirect dispatch. (To really take advantage of this, we'll need to support some sort of
+                    //       "swapchain sized" direct dispatch concept.)
+                    device.cmd_pipeline_barrier(
+                        cmd_buffer,
+                        vk::PipelineStageFlags::COMPUTE_SHADER,
+                        vk::PipelineStageFlags::COMPUTE_SHADER
+                            | vk::PipelineStageFlags::DRAW_INDIRECT,
+                        vk::DependencyFlags::empty(),
+                        &[vk::MemoryBarrier::builder()
+                            .src_access_mask(
+                                vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                            )
+                            .dst_access_mask(
+                                vk::AccessFlags::SHADER_READ
+                                    | vk::AccessFlags::SHADER_WRITE
+                                    | vk::AccessFlags::INDIRECT_COMMAND_READ,
+                            )
+                            .build()],
+                        &[],
+                        &[],
+                    );
+                }
             }
         }
 
