@@ -10,7 +10,7 @@ use vkutil::*;
 
 use serde::{Deserialize, Serialize};
 
-use crate::renderer::{Renderer, NUM_IMAGE_SLOTS, NUM_BUFFER_SLOTS};
+use crate::renderer::{Renderer, NUM_BUFFER_SLOTS, NUM_IMAGE_SLOTS};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
