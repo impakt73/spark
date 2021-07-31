@@ -204,7 +204,7 @@ impl Engine {
     fn reload_demo_config_file(&mut self) {
         if let Some(path) = &self.demo_config_path {
             // Attempt to load a new demo config
-            match DemoConfig::from_path(&path) {
+            match DemoConfig::from_path(path) {
                 Ok(demo_config) => {
                     self.demo_config = Some(demo_config);
 
@@ -252,7 +252,7 @@ impl Engine {
             let resource_dir = self
                 .demo_config_path
                 .as_ref()
-                .map(|path| DemoConfig::query_res_dir(&path));
+                .map(|path| DemoConfig::query_res_dir(path));
 
             match RenderGraph::new(
                 &demo_config.graph,
@@ -300,7 +300,7 @@ impl Engine {
             }
             _ => {
                 self.imgui_platform
-                    .handle_event(self.imgui_context.io_mut(), &self.window, &event);
+                    .handle_event(self.imgui_context.io_mut(), &self.window, event);
 
                 match event {
                     Event::WindowEvent { event, .. } => match event {

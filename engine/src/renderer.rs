@@ -1469,7 +1469,7 @@ impl Renderer {
                             | vk::ShaderStageFlags::FRAGMENT
                             | vk::ShaderStageFlags::COMPUTE,
                         0,
-                        &push_constants.align_to::<u8>().1,
+                        push_constants.align_to::<u8>().1,
                     );
 
                     match &node.dispatch {
