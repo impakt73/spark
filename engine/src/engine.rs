@@ -473,10 +473,15 @@ impl Engine {
 
         let is_debug_build = cfg!(debug_assertions);
         if !is_debug_build {
-            if self.frame_index == 0 {
-                if let Some(track) = &mut self.audio_track {
+            if let Some(track) = &mut self.audio_track {
+                if self.frame_index == 0 {
                     track.play().expect("Failed to play audio track");
+                } else if !track.is_playing() {
+                    // Exit the demo when the audio track is no longer playing in release builds
+                    self.exit_requested = true;
                 }
+            } else {
+                panic!("Release builds without an audio track are not supported");
             }
         } else {
             // Keyboard based audio track control is only avaiable in debug builds
