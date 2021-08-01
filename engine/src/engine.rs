@@ -761,6 +761,11 @@ impl Engine {
         let mut engine = Self::new(window, demo_config_path);
 
         event_loop.run(move |event, _, control_flow| {
+            // Hide the cursor in release builds
+            // NOTE: This only seems to work correctly when executed exactly here...
+            let is_debug_build = cfg!(debug_assertions);
+            engine.window.set_cursor_visible(is_debug_build);
+
             engine.handle_event(&event, control_flow);
         });
     }
