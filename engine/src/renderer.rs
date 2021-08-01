@@ -82,6 +82,26 @@ fn compile_shader(_path: &Path) -> Result<Vec<u32>> {
     Err(RendererError::ShaderCompilationNotAvailable.into())
 }
 
+pub struct CameraInfo {
+    pub z_near: f32,
+    pub z_far: f32,
+    pub fov_degrees: f32,
+    pub position: glam::Vec3,
+    pub target: glam::Vec3,
+}
+
+impl Default for CameraInfo {
+    fn default() -> Self {
+        Self {
+            z_near: 0.1,
+            z_far: 1000.0,
+            fov_degrees: 40.0,
+            position: glam::vec3(30.0, 25.0, 20.0),
+            target: glam::vec3(0.0, 5.0, 0.0),
+        }
+    }
+}
+
 struct FrameState {
     #[allow(dead_code)]
     cmd_buffer: vk::CommandBuffer,
@@ -1307,6 +1327,7 @@ impl Renderer {
         graph: &RenderGraph,
         cur_time: &Duration,
         sync_buffer_data: &[f32],
+        camera_info: CameraInfo,
     ) -> Result<()> {
         let renderer_frame_state = &mut self.frame_states[self.cur_swapchain_idx];
 
@@ -1334,33 +1355,22 @@ impl Renderer {
             .write_all(swapchain_res_uint.as_byte_slice())
             .unwrap();
 
-        // TODO: Source camera parameters from applicaton
-
         let proj_matrix = glam::Mat4::perspective_rh(
-            40.0_f32.to_radians(),
+            camera_info.fov_degrees.to_radians(),
             (self.swapchain.surface_resolution.width as f32)
                 / (self.swapchain.surface_resolution.height as f32),
-            0.1,
-            1000.0,
+            camera_info.z_near,
+            camera_info.z_far,
         );
 
         self.constant_writer
             .write_all(bytemuck::bytes_of(&proj_matrix))
             .unwrap();
 
-        //let camera_pos = glam::vec3(
-        //    f32::sin(cur_time.as_secs_f32() / 64.0) * 50.0,
-        //    25.0,
-        //    f32::cos(cur_time.as_secs_f32() / 64.0) * 50.0,
-        //);
+        let camera_pos = camera_info.position; //glam::vec3(30.0, 25.0, 20.0);
 
-        let camera_pos = glam::vec3(30.0, 25.0, 20.0);
-
-        let view_matrix = glam::Mat4::look_at_rh(
-            camera_pos,
-            glam::vec3(0.0, 5.0, 0.0),
-            glam::vec3(0.0, 1.0, 0.0),
-        );
+        let view_matrix =
+            glam::Mat4::look_at_rh(camera_pos, camera_info.target, glam::vec3(0.0, 1.0, 0.0));
 
         self.constant_writer
             .write_all(bytemuck::bytes_of(&view_matrix))

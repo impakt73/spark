@@ -12,8 +12,11 @@ use winit::{
     window::{Fullscreen, Window, WindowBuilder},
 };
 
-use crate::audio_device::{AudioDevice, AudioTrack};
 use crate::renderer::Renderer;
+use crate::{
+    audio_device::{AudioDevice, AudioTrack},
+    renderer::CameraInfo,
+};
 use crate::{
     input_state::InputState,
     render_graph::{RenderGraph, RenderGraphDesc},
@@ -25,6 +28,76 @@ use crate::log::*;
 
 /// Number of "Rows" per second used by GNU Rocket Sync Tool
 const ROWS_PER_SECOND: u32 = 100;
+
+fn populate_camera_info(camera_info: &mut CameraInfo, row: u32, source: &mut SyncSource) {
+    match source {
+        SyncSource::Client(client) => {
+            // Extract built-in sync params
+            if let Ok(track) = client.get_track_mut("Camera_ZNear") {
+                camera_info.z_near = track.get_value(row as f32);
+            }
+            if let Ok(track) = client.get_track_mut("Camera_ZFar") {
+                camera_info.z_far = track.get_value(row as f32);
+            }
+            if let Ok(track) = client.get_track_mut("Camera_Fov") {
+                camera_info.fov_degrees = track.get_value(row as f32);
+            }
+
+            if let Ok(track) = client.get_track_mut("Camera_PositionX") {
+                camera_info.position.x = track.get_value(row as f32);
+            }
+            if let Ok(track) = client.get_track_mut("Camera_PositionY") {
+                camera_info.position.y = track.get_value(row as f32);
+            }
+            if let Ok(track) = client.get_track_mut("Camera_PositionZ") {
+                camera_info.position.z = track.get_value(row as f32);
+            }
+
+            if let Ok(track) = client.get_track_mut("Camera_TargetX") {
+                camera_info.target.x = track.get_value(row as f32);
+            }
+            if let Ok(track) = client.get_track_mut("Camera_TargetY") {
+                camera_info.target.y = track.get_value(row as f32);
+            }
+            if let Ok(track) = client.get_track_mut("Camera_TargetZ") {
+                camera_info.target.z = track.get_value(row as f32);
+            }
+        }
+        SyncSource::Player(player) => {
+            // Extract built-in sync params
+            if let Some(track) = player.get_track("Camera_ZNear") {
+                camera_info.z_near = track.get_value(row as f32);
+            }
+            if let Some(track) = player.get_track("Camera_ZFar") {
+                camera_info.z_far = track.get_value(row as f32);
+            }
+            if let Some(track) = player.get_track("Camera_Fov") {
+                camera_info.fov_degrees = track.get_value(row as f32);
+            }
+
+            if let Some(track) = player.get_track("Camera_PositionX") {
+                camera_info.position.x = track.get_value(row as f32);
+            }
+            if let Some(track) = player.get_track("Camera_PositionY") {
+                camera_info.position.y = track.get_value(row as f32);
+            }
+            if let Some(track) = player.get_track("Camera_PositionZ") {
+                camera_info.position.z = track.get_value(row as f32);
+            }
+
+            if let Some(track) = player.get_track("Camera_TargetX") {
+                camera_info.target.x = track.get_value(row as f32);
+            }
+            if let Some(track) = player.get_track("Camera_TargetY") {
+                camera_info.target.y = track.get_value(row as f32);
+            }
+            if let Some(track) = player.get_track("Camera_TargetZ") {
+                camera_info.target.z = track.get_value(row as f32);
+            }
+        }
+        _ => {}
+    }
+}
 
 pub enum WindowConfig {
     Windowed { width: u32, height: u32 },
@@ -600,11 +673,19 @@ impl Engine {
                 render_graph_image = true;
             }
 
+            let mut camera_info = CameraInfo::default();
+
             // Produce a sync buffer here and pass it to the graph execution
             let mut sync_buffer_data = Vec::new();
             if let Some(config) = &self.demo_config {
+                populate_camera_info(
+                    &mut camera_info,
+                    self.current_sync_row,
+                    &mut self.sync_source,
+                );
                 match &mut self.sync_source {
                     SyncSource::Client(client) => {
+                        // Extract demo sync params
                         for track_name in &config.sync.tracks {
                             if let Ok(track) = client.get_track_mut(track_name) {
                                 let track_val = track.get_value(self.current_sync_row as f32);
@@ -613,6 +694,7 @@ impl Engine {
                         }
                     }
                     SyncSource::Player(player) => {
+                        // Extract demo sync params
                         for track_name in &config.sync.tracks {
                             if let Some(track) = player.get_track(track_name) {
                                 let track_val = track.get_value(self.current_sync_row as f32);
@@ -625,7 +707,7 @@ impl Engine {
             }
 
             self.renderer
-                .execute_graph(graph, &cur_time, &sync_buffer_data)
+                .execute_graph(graph, &cur_time, &sync_buffer_data, camera_info)
                 .expect("Failed to execute render graph");
         }
 
