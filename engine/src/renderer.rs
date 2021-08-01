@@ -1302,7 +1302,12 @@ impl Renderer {
         self.create_compute_pipeline_from_buffer(&spv)
     }
 
-    pub fn execute_graph(&mut self, graph: &RenderGraph, cur_time: &Duration) -> Result<()> {
+    pub fn execute_graph(
+        &mut self,
+        graph: &RenderGraph,
+        cur_time: &Duration,
+        sync_buffer_data: &[f32],
+    ) -> Result<()> {
         let renderer_frame_state = &mut self.frame_states[self.cur_swapchain_idx];
 
         let graph_frame_state = &graph.frame_states[self.cur_swapchain_idx];
@@ -1343,15 +1348,17 @@ impl Renderer {
             .write_all(bytemuck::bytes_of(&proj_matrix))
             .unwrap();
 
-        let camera_pos = glam::vec3(
-            f32::sin(cur_time.as_secs_f32() * std::f32::consts::PI * 2.0 * 0.25) * 3.0,
-            1.5,
-            f32::cos(cur_time.as_secs_f32() * std::f32::consts::PI * 2.0 * 0.25) * 3.0,
-        );
+        //let camera_pos = glam::vec3(
+        //    f32::sin(cur_time.as_secs_f32() / 64.0) * 50.0,
+        //    25.0,
+        //    f32::cos(cur_time.as_secs_f32() / 64.0) * 50.0,
+        //);
+
+        let camera_pos = glam::vec3(30.0, 25.0, 20.0);
 
         let view_matrix = glam::Mat4::look_at_rh(
             camera_pos,
-            glam::vec3(0.0, 0.0, 0.0),
+            glam::vec3(0.0, 5.0, 0.0),
             glam::vec3(0.0, 1.0, 0.0),
         );
 
@@ -1364,6 +1371,14 @@ impl Renderer {
         self.constant_writer
             .write_all(bytemuck::bytes_of(&proj_view_matrix))
             .unwrap();
+
+        // Write sync buffer
+        if !sync_buffer_data.is_empty() {
+            let sync_buffer_data_as_u8 = unsafe { sync_buffer_data.align_to::<u8>().1 };
+            self.constant_writer
+                .write_all(sync_buffer_data_as_u8)
+                .unwrap();
+        }
 
         if let Some(debug_messenger) = &mut self.debug_messenger {
             debug_messenger.begin_label(cmd_buffer, &format!("Graph [{}]", graph.name));

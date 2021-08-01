@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::log::*;
 
+/// Number of "Rows" per second used by GNU Rocket Sync Tool
+const ROWS_PER_SECOND: u32 = 100;
+
 pub enum WindowConfig {
     Windowed { width: u32, height: u32 },
     Fullscreen,
@@ -38,10 +41,17 @@ impl Default for WindowConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+struct SyncConfig {
+    tracks: Vec<String>,
+    data_path: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct DemoConfig {
     group_name: String,
     demo_name: String,
     track_path: String,
+    sync: SyncConfig,
     graph: RenderGraphDesc,
 }
 
@@ -147,7 +157,21 @@ fn build_window_title(demo_config: &Option<DemoConfig>) -> String {
     }
 }
 
+/// Enumerates different possible sources for synchronization data
+enum SyncSource {
+    /// Synchronization data sourced from a connected tool
+    Client(rust_rocket::RocketClient),
+
+    /// Synchronization data sourced from local memory
+    Player(rust_rocket::RocketPlayer),
+
+    /// No synchronization data
+    None,
+}
+
 pub struct Engine {
+    sync_source: SyncSource,
+    current_sync_row: u32,
     imgui_context: imgui::Context,
     imgui_platform: WinitPlatform,
     graph: Option<RenderGraph>,
@@ -157,6 +181,7 @@ pub struct Engine {
     input_state: InputState,
     window: Window,
     last_frame_time: Instant,
+    frame_index: usize,
     exit_requested: bool,
     timer: FrameTimer,
     demo_config_path: Option<String>,
@@ -177,13 +202,15 @@ impl Engine {
 
         let audio_device = Arc::new(AudioDevice::new().expect("Failed to create audio device"));
 
-        let enable_validation = cfg!(debug_assertions);
-        let renderer = Renderer::new(&window, enable_validation, &mut imgui_context)
+        let is_debug_build = cfg!(debug_assertions);
+        let renderer = Renderer::new(&window, is_debug_build, &mut imgui_context)
             .expect("Failed to create renderer");
 
         window.set_visible(true);
 
         Engine {
+            sync_source: SyncSource::None,
+            current_sync_row: 0,
             imgui_context,
             imgui_platform,
             graph: None,
@@ -193,6 +220,7 @@ impl Engine {
             input_state: InputState::default(),
             window,
             last_frame_time: Instant::now(),
+            frame_index: 0,
             exit_requested: false,
             timer: FrameTimer::new(64),
             demo_config_path,
@@ -243,6 +271,35 @@ impl Engine {
                         "Failed to load audio track: {} ({})",
                         demo_config.track_path, err
                     );
+                }
+            }
+
+            let is_debug_build = cfg!(debug_assertions);
+            if is_debug_build {
+                match rust_rocket::RocketClient::new() {
+                    Ok(client) => {
+                        self.sync_source = SyncSource::Client(client);
+                    }
+                    Err(err) => {
+                        error!("Failed to create sync client: {}", err);
+                    }
+                }
+            } else {
+                match std::fs::read(&demo_config.sync.data_path) {
+                    Ok(data) => {
+                        match serde_json::from_slice::<Vec<rust_rocket::track::Track>>(&data) {
+                            Ok(tracks) => {
+                                self.sync_source =
+                                    SyncSource::Player(rust_rocket::RocketPlayer::new(tracks));
+                            }
+                            Err(err) => {
+                                error!("Failed to parse sync data: {}", err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Failed to load sync data: {}", err);
+                    }
                 }
             }
 
@@ -341,37 +398,93 @@ impl Engine {
         let now = Instant::now();
         let delta_time = now - self.last_frame_time;
 
-        // Audio track control
-        if let Some(track) = &mut self.audio_track {
-            if self.input_state.is_key_pressed(VirtualKeyCode::Space)
-                && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
-            {
-                if let Err(err) = track.toggle_pause() {
-                    error!("Failed to toggle audio track playback: {}", err);
+        let is_debug_build = cfg!(debug_assertions);
+        if !is_debug_build {
+            if self.frame_index == 0 {
+                if let Some(track) = &mut self.audio_track {
+                    track.play().expect("Failed to play audio track");
                 }
             }
-            if !track.is_playing() {
-                let mut modifier = 0.05;
-                if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
-                    || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
+        } else {
+            // Keyboard based audio track control is only avaiable in debug builds
+            if let Some(track) = &mut self.audio_track {
+                if self.input_state.is_key_pressed(VirtualKeyCode::Space)
+                    && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
                 {
-                    if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
-                        || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
-                    {
-                        modifier = 25.0;
-                    } else {
-                        modifier = 5.0;
+                    if let Err(err) = track.toggle_pause() {
+                        error!("Failed to toggle audio track playback: {}", err);
                     }
                 }
-
-                let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
-                if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
-                    if let Err(err) = track.subtract_position_offset(&offset) {
-                        error!("Failed to rewind audio track: {}", err);
+                if !track.is_playing() {
+                    let mut modifier = 0.05;
+                    if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
+                        || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
+                    {
+                        if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
+                            || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
+                        {
+                            modifier = 25.0;
+                        } else {
+                            modifier = 5.0;
+                        }
                     }
-                } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
-                    if let Err(err) = track.add_position_offset(&offset) {
-                        error!("Failed to fast-forward audio track: {}", err);
+
+                    let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
+                    if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
+                        if let Err(err) = track.subtract_position_offset(&offset) {
+                            error!("Failed to rewind audio track: {}", err);
+                        }
+                    } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
+                        if let Err(err) = track.add_position_offset(&offset) {
+                            error!("Failed to fast-forward audio track: {}", err);
+                        }
+                    }
+                }
+            }
+        }
+
+        self.current_sync_row = if let Some(track) = &self.audio_track {
+            (track.get_position().unwrap_or_default().as_secs_f32() * ROWS_PER_SECOND as f32) as u32
+        } else {
+            0
+        };
+
+        if let SyncSource::Client(client) = &mut self.sync_source {
+            if let Err(err) = client.set_row(self.current_sync_row) {
+                error!("Failed to set rocket's row {}", err);
+            }
+
+            while let Ok(Some(event)) = client.poll_events() {
+                match event {
+                    rust_rocket::client::Event::SetRow(row) => {
+                        let track_time = row as f32 / ROWS_PER_SECOND as f32;
+
+                        if let Some(track) = &mut self.audio_track {
+                            if let Err(err) =
+                                track.set_position(&Duration::from_secs_f32(track_time))
+                            {
+                                error!("Failed to set audio track via rocket: {}", err);
+                            }
+                        }
+                    }
+                    rust_rocket::client::Event::Pause(pause) => {
+                        if let Some(track) = &mut self.audio_track {
+                            if pause {
+                                if let Err(err) = track.pause() {
+                                    error!("Failed to pause audio track via rocket: {}", err);
+                                }
+                            } else if let Err(err) = track.play() {
+                                error!("Failed to play audio track via rocket: {}", err);
+                            }
+                        }
+                    }
+                    rust_rocket::client::Event::SaveTracks => {
+                        let tracks = client.save_tracks();
+                        std::fs::write(
+                            "res/sync.json",
+                            serde_json::to_string_pretty(&tracks).unwrap(),
+                        )
+                        .unwrap();
                     }
                 }
             }
@@ -487,8 +600,32 @@ impl Engine {
                 render_graph_image = true;
             }
 
+            // Produce a sync buffer here and pass it to the graph execution
+            let mut sync_buffer_data = Vec::new();
+            if let Some(config) = &self.demo_config {
+                match &mut self.sync_source {
+                    SyncSource::Client(client) => {
+                        for track_name in &config.sync.tracks {
+                            if let Ok(track) = client.get_track_mut(track_name) {
+                                let track_val = track.get_value(self.current_sync_row as f32);
+                                sync_buffer_data.push(track_val);
+                            }
+                        }
+                    }
+                    SyncSource::Player(player) => {
+                        for track_name in &config.sync.tracks {
+                            if let Some(track) = player.get_track(track_name) {
+                                let track_val = track.get_value(self.current_sync_row as f32);
+                                sync_buffer_data.push(track_val);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
             self.renderer
-                .execute_graph(graph, &cur_time)
+                .execute_graph(graph, &cur_time, &sync_buffer_data)
                 .expect("Failed to execute render graph");
         }
 
@@ -498,7 +635,10 @@ impl Engine {
             self.renderer.render_graph_image();
         }
 
-        self.renderer.render_ui(draw_data);
+        let is_debug_build = cfg!(debug_assertions);
+        if is_debug_build {
+            self.renderer.render_ui(draw_data);
+        }
 
         self.renderer.end_render();
 
@@ -510,6 +650,8 @@ impl Engine {
         if reload_demo {
             self.reload_demo_config_file();
         }
+
+        self.frame_index += 1;
     }
 
     pub fn run() -> ! {

@@ -26,6 +26,7 @@ bytemuck            = "1.7"
 glam                = { version = "0.16", features = ["bytemuck"] }
 tracing             = "0.1"
 tracing-subscriber  = "0.2"
+rust-rocket         = "0.7"
 
 [features]
 tools = ["shaderc"]

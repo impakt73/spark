@@ -47,3 +47,4 @@ const uint kSwapchainResolutionUvec2StaticOffset = kSwapchainResolutionVec2Stati
 const uint kProjMatrixStaticOffset = kSwapchainResolutionUvec2StaticOffset + 2;
 const uint kViewMatrixStaticOffset = kProjMatrixStaticOffset + 16;
 const uint kProjViewMatrixStaticOffset = kViewMatrixStaticOffset + 16;
+const uint kSyncBufferStaticOffset = kProjViewMatrixStaticOffset + 16;
