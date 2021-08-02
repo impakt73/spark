@@ -435,13 +435,9 @@ impl VkDevice {
 
             // Set up required shader features
 
-            device_1_0_features.features.shader_int16 = 1;
             device_1_0_features.features.shader_int64 = 1;
 
-            device_1_1_features.storage_buffer16_bit_access = 1;
-
             device_1_2_features.shader_buffer_int64_atomics = 1;
-            device_1_2_features.shader_shared_int64_atomics = 1;
 
             let device_create_info = vk::DeviceCreateInfo::builder()
                 .queue_create_infos(&queue_infos)
