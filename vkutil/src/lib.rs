@@ -6,75 +6,24 @@ use ash::{
         PhysicalDeviceVulkan12Features,
     },
 };
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::sync::{Arc, Weak};
 
+#[allow(unused_imports)]
 mod log {
-    #[allow(unused_imports)]
-    pub(crate) use tracing::{debug, error, info, info_span, instrument, span, trace, warn, Level};
+    pub(crate) use tracing::{error, error_span};
+    pub(crate) use tracing::{info, info_span};
+    pub(crate) use tracing::{trace, trace_span};
+    pub(crate) use tracing::{warn, warn_span};
 }
 
+#[allow(unused_imports)]
 use crate::log::*;
 
+mod vk_msg_callback;
+use vk_msg_callback::vulkan_debug_messenger_cb;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-unsafe extern "system" fn vulkan_debug_callback(
-    msg_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    _msg_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    cb_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _user_data: *mut core::ffi::c_void,
-) -> u32 {
-    // Start a span to record how much time we spend in these
-    const SPAN_NAME: &str = "Vk Debug Msg Callback";
-    let span = match msg_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => tracing::error_span!(SPAN_NAME),
-        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => tracing::warn_span!(SPAN_NAME),
-        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => tracing::info_span!(SPAN_NAME),
-        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => tracing::trace_span!(SPAN_NAME),
-        // Unknown levels should be logged as an error
-        _ => tracing::error_span!(SPAN_NAME),
-    };
-    let _span_enter = span.enter();
-
-    // TODO: Extract more data from this
-    let data: &vk::DebugUtilsMessengerCallbackDataEXT = cb_data
-        .as_ref()
-        .expect("DebugUtilsMessengerCallbackDataEXT was NULL");
-
-    let _object_name_infos: &[vk::DebugUtilsObjectNameInfoEXT] = {
-        if data.object_count != 0 {
-            std::slice::from_raw_parts(data.p_objects, data.object_count as usize)
-        } else {
-            &[]
-        }
-    };
-
-    let message = CStr::from_ptr(data.p_message)
-        .to_str()
-        .unwrap_or("<invalid UTF8>");
-
-    const VK_TARGET: &str = "Vulkan Debug Messenger";
-
-    // We can't use a runtime value for the Level option, so switch and call each macro directly
-    macro_rules! e {
-        ($level:expr, $($rest:tt)+) => {
-            match $level {
-                vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => error!($($rest)+),
-                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => warn!($($rest)+),
-                vk::DebugUtilsMessageSeverityFlagsEXT::INFO => info!($($rest)+),
-                vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => trace!($($rest)+),
-                _ => {
-                    error!($($rest)+);
-                    panic!("Unrecognized severity: {:?}", msg_severity)
-                }
-            };
-        };
-    }
-
-    e!(msg_severity, target: VK_TARGET, "{}", message);
-
-    vk::FALSE
-}
 
 pub struct ComputePipeline {
     inner: vk::Pipeline,
@@ -293,7 +242,7 @@ impl VkDebugMessenger {
                         | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
                 )
                 .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
-                .pfn_user_callback(Some(vulkan_debug_callback));
+                .pfn_user_callback(Some(vulkan_debug_messenger_cb));
 
             let debug_messenger_ext = ext::DebugUtils::new(&instance.entry, &instance.inner);
             let debug_messenger =
