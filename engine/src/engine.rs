@@ -157,6 +157,7 @@ pub struct Engine {
     input_state: InputState,
     window: Window,
     last_frame_time: Instant,
+    frame_index: usize,
     exit_requested: bool,
     timer: FrameTimer,
     demo_config_path: Option<String>,
@@ -177,8 +178,8 @@ impl Engine {
 
         let audio_device = Arc::new(AudioDevice::new().expect("Failed to create audio device"));
 
-        let enable_validation = cfg!(debug_assertions);
-        let renderer = Renderer::new(&window, enable_validation, &mut imgui_context)
+        let is_debug_build = cfg!(debug_assertions);
+        let renderer = Renderer::new(&window, is_debug_build, &mut imgui_context)
             .expect("Failed to create renderer");
 
         window.set_visible(true);
@@ -193,6 +194,7 @@ impl Engine {
             input_state: InputState::default(),
             window,
             last_frame_time: Instant::now(),
+            frame_index: 0,
             exit_requested: false,
             timer: FrameTimer::new(64),
             demo_config_path,
@@ -341,37 +343,46 @@ impl Engine {
         let now = Instant::now();
         let delta_time = now - self.last_frame_time;
 
-        // Audio track control
-        if let Some(track) = &mut self.audio_track {
-            if self.input_state.is_key_pressed(VirtualKeyCode::Space)
-                && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
-            {
-                if let Err(err) = track.toggle_pause() {
-                    error!("Failed to toggle audio track playback: {}", err);
+        let is_debug_build = cfg!(debug_assertions);
+        if !is_debug_build {
+            if self.frame_index == 0 {
+                if let Some(track) = &mut self.audio_track {
+                    track.play().expect("Failed to play audio track");
                 }
             }
-            if !track.is_playing() {
-                let mut modifier = 0.05;
-                if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
-                    || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
+        } else {
+            // Keyboard based audio track control is only avaiable in debug builds
+            if let Some(track) = &mut self.audio_track {
+                if self.input_state.is_key_pressed(VirtualKeyCode::Space)
+                    && !self.input_state.was_key_pressed(VirtualKeyCode::Space)
                 {
-                    if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
-                        || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
-                    {
-                        modifier = 25.0;
-                    } else {
-                        modifier = 5.0;
+                    if let Err(err) = track.toggle_pause() {
+                        error!("Failed to toggle audio track playback: {}", err);
                     }
                 }
-
-                let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
-                if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
-                    if let Err(err) = track.subtract_position_offset(&offset) {
-                        error!("Failed to rewind audio track: {}", err);
+                if !track.is_playing() {
+                    let mut modifier = 0.05;
+                    if self.input_state.is_key_pressed(VirtualKeyCode::LShift)
+                        || self.input_state.is_key_pressed(VirtualKeyCode::RShift)
+                    {
+                        if self.input_state.is_key_pressed(VirtualKeyCode::LAlt)
+                            || self.input_state.is_key_pressed(VirtualKeyCode::RAlt)
+                        {
+                            modifier = 25.0;
+                        } else {
+                            modifier = 5.0;
+                        }
                     }
-                } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
-                    if let Err(err) = track.add_position_offset(&offset) {
-                        error!("Failed to fast-forward audio track: {}", err);
+
+                    let offset = Duration::from_secs_f64(delta_time.as_secs_f64() * modifier);
+                    if self.input_state.is_key_pressed(VirtualKeyCode::Left) {
+                        if let Err(err) = track.subtract_position_offset(&offset) {
+                            error!("Failed to rewind audio track: {}", err);
+                        }
+                    } else if self.input_state.is_key_pressed(VirtualKeyCode::Right) {
+                        if let Err(err) = track.add_position_offset(&offset) {
+                            error!("Failed to fast-forward audio track: {}", err);
+                        }
                     }
                 }
             }
@@ -498,7 +509,10 @@ impl Engine {
             self.renderer.render_graph_image();
         }
 
-        self.renderer.render_ui(draw_data);
+        let is_debug_build = cfg!(debug_assertions);
+        if is_debug_build {
+            self.renderer.render_ui(draw_data);
+        }
 
         self.renderer.end_render();
 
@@ -510,6 +524,8 @@ impl Engine {
         if reload_demo {
             self.reload_demo_config_file();
         }
+
+        self.frame_index += 1;
     }
 
     pub fn run() -> ! {
