@@ -133,7 +133,6 @@ impl ComputePipeline {
 fn select_instance_extensions(
     entry: &ash::Entry,
     surface_extensions: Vec<CString>,
-    enable_validation: bool,
 ) -> Result<(Vec<CString>, bool)> {
     let supported_exts = entry.enumerate_instance_extension_properties()?;
 
@@ -144,18 +143,16 @@ fn select_instance_extensions(
 
     // If the caller wants API validation, make sure we try to add the debug utils extension here
     let mut debug_msg_enabled = false;
-    if enable_validation {
-        let dbg_msg_supported = supported_exts.iter().any(|ext| unsafe {
-            libc::strcmp(
-                ext.extension_name.as_ptr(),
-                ext::DebugUtils::name().as_ptr(),
-            ) == 0
-        });
-        if dbg_msg_supported {
-            let debug_utils_ext_name = CString::new(ext::DebugUtils::name().to_bytes())?;
-            exts.push(debug_utils_ext_name);
-            debug_msg_enabled = true;
-        }
+    let dbg_msg_supported = supported_exts.iter().any(|ext| unsafe {
+        libc::strcmp(
+            ext.extension_name.as_ptr(),
+            ext::DebugUtils::name().as_ptr(),
+        ) == 0
+    });
+    if dbg_msg_supported {
+        let debug_utils_ext_name = CString::new(ext::DebugUtils::name().to_bytes())?;
+        exts.push(debug_utils_ext_name);
+        debug_msg_enabled = true;
     }
 
     Ok((exts, debug_msg_enabled))
@@ -238,7 +235,7 @@ impl VkInstance {
                 .map(|ext| CString::new(ext.to_bytes()).unwrap())
                 .collect::<Vec<_>>();
             let (instance_extension_strings, debug_msg_enabled) =
-                select_instance_extensions(&entry, surface_extensions, enable_validation)?;
+                select_instance_extensions(&entry, surface_extensions)?;
             let instance_extensions = instance_extension_strings
                 .iter()
                 .map(|ext| ext.as_ptr())
@@ -438,13 +435,9 @@ impl VkDevice {
 
             // Set up required shader features
 
-            device_1_0_features.features.shader_int16 = 1;
             device_1_0_features.features.shader_int64 = 1;
 
-            device_1_1_features.storage_buffer16_bit_access = 1;
-
             device_1_2_features.shader_buffer_int64_atomics = 1;
-            device_1_2_features.shader_shared_int64_atomics = 1;
 
             let device_create_info = vk::DeviceCreateInfo::builder()
                 .queue_create_infos(&queue_infos)
