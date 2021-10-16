@@ -4,6 +4,11 @@ layout(std430, set = 1, binding = 1) restrict buffer Buffers
     uint Data[];
 } uBuffers[NUM_BUFFER_SLOTS];
 
+layout(std430, set = 1, binding = 1) restrict readonly buffer BuffersRO
+{
+    uint Data[];
+} uBuffersRO[NUM_BUFFER_SLOTS];
+
 layout(std430, set = 1, binding = 1) restrict buffer Buffers64
 {
     uint64_t Data[];
