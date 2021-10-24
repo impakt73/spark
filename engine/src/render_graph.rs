@@ -67,9 +67,16 @@ pub struct RenderGraphIndirectDispatchDesc {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct RenderGraphSwapchainDispatchDesc {
+    pub local_group_size_x: u32,
+    pub local_group_size_y: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum RenderGraphDispatchDesc {
     Direct(RenderGraphDirectDispatchDesc),
     Indirect(RenderGraphIndirectDispatchDesc),
+    Swapchain(RenderGraphSwapchainDispatchDesc),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -169,6 +176,11 @@ fn vk_format_from_string(string: &str) -> vk::Format {
         "r32" => vk::Format::R32_UINT,
         _ => vk::Format::UNDEFINED,
     }
+}
+
+/// Returns the number of groups required to satisfy the provided size
+fn calc_num_groups(total_size: u32, group_size: u32) -> u32 {
+    (total_size + (group_size - 1)) / group_size
 }
 
 pub struct RenderGraph {
@@ -455,6 +467,20 @@ impl RenderGraph {
                     RenderGraphDispatchParams::Indirect(RenderGraphIndirectDispatchParams {
                         buffer,
                         buffer_offset: dispatch_desc.offset,
+                    })
+                }
+                RenderGraphDispatchDesc::Swapchain(dispatch_desc) => {
+                    let (swapchain_width, swapchain_height) = renderer.get_swapchain_resolution();
+                    RenderGraphDispatchParams::Direct(RenderGraphDirectDispatchParams {
+                        num_groups_x: calc_num_groups(
+                            swapchain_width,
+                            dispatch_desc.local_group_size_x,
+                        ),
+                        num_groups_y: calc_num_groups(
+                            swapchain_height,
+                            dispatch_desc.local_group_size_y,
+                        ),
+                        num_groups_z: 1,
                     })
                 }
             };
