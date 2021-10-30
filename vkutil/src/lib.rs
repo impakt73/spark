@@ -718,8 +718,7 @@ impl Drop for VkBuffer {
         // TODO: This function always returns a successful result and should be modified to not
         //       return anything.
         unwrap_allocator(&self.allocator)
-            .destroy_buffer(self.inner, &self.allocation)
-            .unwrap();
+            .destroy_buffer(self.inner, &self.allocation);
     }
 }
 
@@ -754,8 +753,7 @@ impl Drop for VkImage {
         // TODO: This function always returns a successful result and should be modified to not
         //       return anything.
         unwrap_allocator(&self.allocator)
-            .destroy_image(self.inner, &self.allocation)
-            .unwrap();
+            .destroy_image(self.inner, &self.allocation);
     }
 }
 
