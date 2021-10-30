@@ -1,0 +1,22 @@
+#version 450
+
+#pragma shader_stage(compute)
+
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#include "Common.glsl"
+
+void main()
+{
+    const uint outputImgIdx = ShaderIoSlot0();
+
+    const float time = READ_BUFFER_FLOAT(uFrameMemoryRO, kCurrentTimeStaticOffset);
+
+    const uvec2 resolution = READ_BUFFER_UINT2(uFrameMemoryRO, kSwapchainResolutionUvec2StaticOffset);
+    uvec2 centerTexCoord = uvec2(gl_GlobalInvocationID.xy);
+
+    if ((centerTexCoord.x < resolution.x) && (centerTexCoord.y < resolution.y))
+    {
+        imageStore(uImages[outputImgIdx], ivec2(centerTexCoord), vec4(sin(time) * 0.5 + 0.5, 0.0, 0.0, 1.0));
+    }
+}

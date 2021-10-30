@@ -1331,7 +1331,7 @@ impl Renderer {
 
         // TODO: Source camera parameters from applicaton
 
-        let proj_matrix = glam::Mat4::perspective_rh(
+        let mut proj_matrix = glam::Mat4::perspective_rh(
             40.0_f32.to_radians(),
             (self.swapchain.surface_resolution.width as f32)
                 / (self.swapchain.surface_resolution.height as f32),
@@ -1339,8 +1339,17 @@ impl Renderer {
             1000.0,
         );
 
+        // Flip the Y direction to account for Vulkan's coordinate space
+        proj_matrix = glam::Mat4::from_scale(glam::vec3(1.0, -1.0, 1.0)) * proj_matrix;
+
         self.constant_writer
             .write_all(bytemuck::bytes_of(&proj_matrix))
+            .unwrap();
+
+        let inv_proj_matrix = proj_matrix.inverse();
+
+        self.constant_writer
+            .write_all(bytemuck::bytes_of(&inv_proj_matrix))
             .unwrap();
 
         let camera_pos = glam::vec3(
@@ -1359,10 +1368,22 @@ impl Renderer {
             .write_all(bytemuck::bytes_of(&view_matrix))
             .unwrap();
 
+        let inv_view_matrix = view_matrix.inverse();
+
+        self.constant_writer
+            .write_all(bytemuck::bytes_of(&inv_view_matrix))
+            .unwrap();
+
         let proj_view_matrix = proj_matrix * view_matrix;
 
         self.constant_writer
             .write_all(bytemuck::bytes_of(&proj_view_matrix))
+            .unwrap();
+
+        let inv_proj_view_matrix = proj_view_matrix.inverse();
+
+        self.constant_writer
+            .write_all(bytemuck::bytes_of(&inv_proj_view_matrix))
             .unwrap();
 
         if let Some(debug_messenger) = &mut self.debug_messenger {
