@@ -44,6 +44,9 @@ uint ShaderIoSlot2()
 const uint kCurrentTimeStaticOffset = 0;
 const uint kSwapchainResolutionVec2StaticOffset = kCurrentTimeStaticOffset + 1;
 const uint kSwapchainResolutionUvec2StaticOffset = kSwapchainResolutionVec2StaticOffset + 2;
-const uint kProjMatrixStaticOffset = kSwapchainResolutionUvec2StaticOffset + 2;
-const uint kViewMatrixStaticOffset = kProjMatrixStaticOffset + 16;
-const uint kProjViewMatrixStaticOffset = kViewMatrixStaticOffset + 16;
+const uint kProjectionMatrixStaticOffset = kSwapchainResolutionUvec2StaticOffset + 2;
+const uint kInverseProjectionMatrixStaticOffset = kProjectionMatrixStaticOffset + 16;
+const uint kViewMatrixStaticOffset = kInverseProjectionMatrixStaticOffset + 16;
+const uint kInverseViewMatrixStaticOffset = kViewMatrixStaticOffset + 16;
+const uint kProjectionViewMatrixStaticOffset = kInverseViewMatrixStaticOffset + 16;
+const uint kInverseProjectionViewMatrixStaticOffset = kProjectionViewMatrixStaticOffset + 16;

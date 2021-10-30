@@ -1,0 +1,35 @@
+{
+    "group_name": "Example Group",
+    "demo_name": "Example Demo",
+    "track_path": "example.mp3",
+    "graph": {
+        "name": "Example Graph",
+        "resources": [
+            {
+                "name": "SceneBuffer",
+                "params": {
+                    "Image" : "SwapchainCompatible"
+                }
+            }
+        ],
+        "nodes": [
+            {
+                "name": "Example",
+                "pipeline": {
+                    "File" : "Example.comp"
+                },
+                "refs": [
+                    "SceneBuffer"
+                ],
+                "deps": [],
+                "dispatch" : {
+                    "Swapchain" : {
+                        "local_group_size_x" : 8,
+                        "local_group_size_y" : 8
+                    }
+                }
+            }
+        ],
+        "output_image_name": "SceneBuffer"
+    }
+}
